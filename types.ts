@@ -1,5 +1,4 @@
 
-
 export enum AppView {
   LANDING = 'LANDING',
   COMMERCIAL_DASHBOARD = 'COMMERCIAL_DASHBOARD',
@@ -109,6 +108,9 @@ export interface Claim {
   internalCloseDate?: string;
   
   driveFolderUrl?: string;
+  
+  // New Flag for visibility management
+  archived?: boolean;
 }
 
 export interface UserUser {

@@ -11,9 +11,9 @@ const ISHIKAWA_SHEET = 'Ishikawa';
 
 function setupSheets() {
   const doc = SpreadsheetApp.getActiveSpreadsheet();
-  // Added 'Estado_Plan_Accion' at the end
+  // Added 'Archivado' at index 18 (Col 19)
   const sheets = {
-    [CLAIMS_SHEET]: ['ID_Reclamacion', 'Fecha_Reporte', 'Estado', 'Cliente', 'Nombre_Reporta', 'Email_Reporta', 'Numero_Factura', 'Marca', 'Productos_Afectados_RAW', 'Lotes_RAW', 'Tipo_Incidente', 'Descripcion', 'Tipo_Correccion', 'URL_Carpeta_Drive', 'Fecha_Cierre_Interno', 'Items_Afectados_JSON', 'Archivos_JSON', 'Estado_Plan_Accion'],
+    [CLAIMS_SHEET]: ['ID_Reclamacion', 'Fecha_Reporte', 'Estado', 'Cliente', 'Nombre_Reporta', 'Email_Reporta', 'Numero_Factura', 'Marca', 'Productos_Afectados_RAW', 'Lotes_RAW', 'Tipo_Incidente', 'Descripcion', 'Tipo_Correccion', 'URL_Carpeta_Drive', 'Fecha_Cierre_Interno', 'Items_Afectados_JSON', 'Archivos_JSON', 'Estado_Plan_Accion', 'Archivado'],
     [TASKS_SHEET]: ['ID_Tarea', 'ID_Reclamacion', 'Descripcion', 'Asignado_A', 'Estado', 'Notas_Ejecucion', 'Evidencia_JSON', 'Fecha_Creacion', 'Fecha_Completado'],
     [MITIGATIONS_SHEET]: ['ID_Mitigacion', 'ID_Reclamacion', 'Descripcion', 'Asignado_A', 'Estado', 'Notas_Ejecucion', 'Evidencia_JSON', 'Fecha_Creacion', 'Fecha_Completado', 'Fecha_Aprobado'],
     [ISHIKAWA_SHEET]: ['ID_Ishikawa', 'ID_Reclamacion', 'Categoria', 'Observacion', 'Fecha_Creacion']
@@ -25,12 +25,13 @@ function setupSheets() {
       sheet.appendRow(sheets[name]);
       sheet.setFrozenRows(1);
     } else {
-       // Auto-migration: Check if new column exists, if not, add header
+       // Auto-migration: Check if new columns exist
        const sheet = doc.getSheetByName(name);
        const lastCol = sheet.getLastColumn();
        const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
-       if (name === CLAIMS_SHEET && headers.length < 18) {
-           sheet.getRange(1, 18).setValue('Estado_Plan_Accion');
+       if (name === CLAIMS_SHEET) {
+           if (headers.length < 18) sheet.getRange(1, 18).setValue('Estado_Plan_Accion');
+           if (headers.length < 19) sheet.getRange(1, 19).setValue('Archivado');
        }
     }
   });
@@ -146,13 +147,13 @@ function doGet(e) {
         
         affectedItems: parseJSONSafe(row[15]),
         files: parseJSONSafe(row[16]),
-        actionPlanStatus: row[17] || 'Pending', // New Field at Index 17
+        actionPlanStatus: row[17] || 'Pending',
+        archived: row[18] === true || row[18] === 'TRUE', // Read archived flag
 
         tasks: tasksMap[id] || [],
         mitigationActions: allMitigations,
         ishikawaList: ishikawaMap[id] || [],
         
-        // Derived/Legacy fields for frontend compatibility
         immediateSolutionStatus: allApproved ? 'Approved' : 'Pending',
       };
     });
@@ -178,7 +179,7 @@ function doPost(e) {
     const data = JSON.parse(e.postData.contents);
     const { action, claimData, rawFiles, id, date, claimId, fileName, base64 } = data;
     
-    setupSheets(); // Ensure sheets exist before any operation
+    setupSheets(); 
 
     switch(action) {
       case 'create_claim':
@@ -193,6 +194,8 @@ function doPost(e) {
         return deleteMitigation(doc, id);
       case 'close_case_definitive':
         return closeCaseDefinitive(doc, id, date);
+      case 'archive_claim':
+        return archiveClaim(doc, id);
       case 'save_pdf':
         return savePdf(claimId, fileName, base64);
       default:
@@ -216,18 +219,16 @@ function createClaim(doc, claimData, rawFiles) {
   const mitigationsSheet = doc.getSheetByName(MITIGATIONS_SHEET);
   const ishikawaSheet = doc.getSheetByName(ISHIKAWA_SHEET);
 
-  // Handle file uploads and get Drive folder URL
   const { driveFolderUrl, uploadedFileInfos } = handleFileUploads(claimData.id, claimData.client, rawFiles);
 
-  // Main Claim Row (Added actionPlanStatus at end)
+  // Added false for archived at the end
   claimsSheet.appendRow([
     claimData.id, claimData.date, claimData.status, claimData.client, claimData.reporterName, claimData.reporterEmail, 
     claimData.invoiceNumber, claimData.brand, claimData.productRef, claimData.batch, claimData.incidentType, 
     claimData.description, claimData.correctionType, driveFolderUrl, '', JSON.stringify(claimData.affectedItems || []), 
-    JSON.stringify(uploadedFileInfos), claimData.actionPlanStatus || 'Pending'
+    JSON.stringify(uploadedFileInfos), claimData.actionPlanStatus || 'Pending', false
   ]);
   
-  // Child Rows
   (claimData.tasks || []).forEach(t => tasksSheet.appendRow([t.id, claimData.id, t.description, t.assignedTo, t.status, '', '[]', t.createdAt, '']));
   (claimData.mitigationActions || []).forEach(m => mitigationsSheet.appendRow([m.id, claimData.id, m.description, m.assignedTo, m.status, '', '[]', m.createdAt, '', '']));
   (claimData.ishikawaList || []).forEach(i => ishikawaSheet.appendRow([i.id, claimData.id, i.category, i.observation, i.createdAt]));
@@ -245,23 +246,24 @@ function updateClaim(doc, claimData, rawFiles) {
   const rowIndex = findRowIndex(claimsSheet, claimId);
   if (rowIndex === -1) throw new Error(`Claim ID ${claimId} not found for update.`);
 
-  // Handle file uploads (adds new files to existing folder)
   const existingFolderUrl = claimsSheet.getRange(rowIndex, 14).getValue();
   const { uploadedFileInfos } = handleFileUploads(claimId, claimData.client, rawFiles, existingFolderUrl);
 
-  // Merge new file info with existing
   const existingFiles = parseJSONSafe(claimsSheet.getRange(rowIndex, 17).getValue());
   const allFiles = [...existingFiles, ...uploadedFileInfos];
 
-  // Update Main Claim Row - Now writing 18 columns to include actionPlanStatus
-  claimsSheet.getRange(rowIndex, 1, 1, 18).setValues([[
+  // Preserve existing archived status if not explicitly passed
+  const currentArchived = claimsSheet.getRange(rowIndex, 19).getValue();
+  const newArchived = claimData.archived !== undefined ? claimData.archived : currentArchived;
+
+  // Update Main Claim Row (19 cols)
+  claimsSheet.getRange(rowIndex, 1, 1, 19).setValues([[
     claimId, claimData.date, claimData.status, claimData.client, claimData.reporterName, claimData.reporterEmail, 
     claimData.invoiceNumber, claimData.brand, claimData.productRef, claimData.batch, claimData.incidentType, 
     claimData.description, claimData.correctionType, existingFolderUrl, claimData.internalCloseDate || '', 
-    JSON.stringify(claimData.affectedItems || []), JSON.stringify(allFiles), claimData.actionPlanStatus || 'Pending'
+    JSON.stringify(claimData.affectedItems || []), JSON.stringify(allFiles), claimData.actionPlanStatus || 'Pending', newArchived
   ]]);
 
-  // Delete and re-add child records to ensure sync
   deleteRowsByClaimId(tasksSheet, claimId);
   (claimData.tasks || []).forEach(t => {
       const evidence = getEvidenceFor(t.id, allFiles);
@@ -292,9 +294,19 @@ function deleteClaim(doc, claimId) {
   return ContentService.createTextOutput(JSON.stringify({ result: 'success', action: 'deleted' })).setMimeType(ContentService.MimeType.JSON);
 }
 
+function archiveClaim(doc, claimId) {
+    const claimsSheet = doc.getSheetByName(CLAIMS_SHEET);
+    const rowIndex = findRowIndex(claimsSheet, claimId);
+    if (rowIndex > -1) {
+      claimsSheet.getRange(rowIndex, 19).setValue(true); // Set Archived to TRUE
+      return ContentService.createTextOutput(JSON.stringify({ result: 'success' })).setMimeType(ContentService.MimeType.JSON);
+    }
+    throw new Error("ID not found for archiving.");
+}
+
 function deleteTask(doc, taskId) {
     const tasksSheet = doc.getSheetByName(TASKS_SHEET);
-    const rowIndex = findRowIndex(tasksSheet, taskId, 0); // ID is in column 0
+    const rowIndex = findRowIndex(tasksSheet, taskId, 0); 
     if (rowIndex !== -1) {
         tasksSheet.deleteRow(rowIndex);
         return ContentService.createTextOutput(JSON.stringify({ result: 'success', action: 'task_deleted' })).setMimeType(ContentService.MimeType.JSON);
@@ -304,7 +316,7 @@ function deleteTask(doc, taskId) {
 
 function deleteMitigation(doc, mitigationId) {
     const mitigationsSheet = doc.getSheetByName(MITIGATIONS_SHEET);
-    const rowIndex = findRowIndex(mitigationsSheet, mitigationId, 0); // ID is in column 0
+    const rowIndex = findRowIndex(mitigationsSheet, mitigationId, 0);
     if (rowIndex !== -1) {
         mitigationsSheet.deleteRow(rowIndex);
         return ContentService.createTextOutput(JSON.stringify({ result: 'success', action: 'mitigation_deleted' })).setMimeType(ContentService.MimeType.JSON);
@@ -317,16 +329,16 @@ function closeCaseDefinitive(doc, id, date) {
     const rowIndex = findRowIndex(claimsSheet, id);
     if (rowIndex > -1) {
       const closeDate = date || Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy");
-      claimsSheet.getRange(rowIndex, 3).setValue('Cerrado'); // Status column
-      claimsSheet.getRange(rowIndex, 15).setValue(closeDate); // Internal Close Date column
+      claimsSheet.getRange(rowIndex, 3).setValue('Cerrado'); 
+      claimsSheet.getRange(rowIndex, 15).setValue(closeDate);
       return ContentService.createTextOutput(JSON.stringify({ result: 'success' })).setMimeType(ContentService.MimeType.JSON);
     }
     throw new Error("ID not found for closure.");
 }
 
 function savePdf(claimId, fileName, base64) {
-    const rootFolder = DriveApp.getFolderById("1PJBsgGwyR1BLG8X6wutmwvXs0ItYoLl2"); // Main Drive Folder ID
-    const folders = rootFolder.getFoldersByName(`${claimId}*`); // Find folder starting with claim ID
+    const rootFolder = DriveApp.getFolderById("1PJBsgGwyR1BLG8X6wutmwvXs0ItYoLl2"); 
+    const folders = rootFolder.getFoldersByName(`${claimId}*`); 
     let targetFolder;
 
     if (folders.hasNext()) {

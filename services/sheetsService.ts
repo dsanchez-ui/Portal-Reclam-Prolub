@@ -1,5 +1,4 @@
 
-
 // Remplaza esta URL con la que obtuviste al desplegar tu Google Apps Script
 const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz6A4fiCK1iE1HTOgqHhWEWihPdZ5Yb7Dmm7C5SzZNpNTXLRx1N1NtW_DCQfJatW-Pj/exec'; 
 
@@ -81,6 +80,24 @@ export const closeClaimSimple = async (id: string, closeDate: string) => {
         return true;
     } catch (error) { 
         console.error("Error closing claim:", error);
+        return false;
+    }
+};
+
+export const archiveClaimInSheet = async (id: string) => {
+    try {
+        await fetch(GOOGLE_SCRIPT_URL, {
+            method: 'POST',
+            mode: 'cors',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ 
+                action: 'archive_claim', 
+                id: id
+            })
+        });
+        return true;
+    } catch (error) { 
+        console.error("Error archiving claim:", error);
         return false;
     }
 };

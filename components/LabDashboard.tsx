@@ -4,12 +4,12 @@ import {
   FlaskConical, Wrench, Factory, Truck, Receipt, Container, ClipboardCheck, ShieldCheck, LogOut, ChevronLeft, 
   Search, Filter, CheckCircle2, Clock, FileText, Save, Plus, Trash2, X, Sparkles, Download, Printer, Zap, Stethoscope,
   Upload, ListFilter, ArrowRight, Activity, AlertTriangle, UserCircle, History, AlertCircle, Eye, BarChart3, TrendingUp, Calendar, ExternalLink, Paperclip, Timer, Users, Image as ImageIcon,
-  ArrowDownUp, FolderOpen, Loader2, Lock, AlertOctagon, ThumbsUp
+  ArrowDownUp, FolderOpen, Loader2, Lock, AlertOctagon, ThumbsUp, PieChart, BarChart4, ClipboardList, EyeOff
 } from 'lucide-react';
 import { Claim, ClaimStatus, InternalRole, IshikawaEntry, Task, EvidenceFile, MitigationAction } from '../types';
 import { enhanceIshikawaObservation, enhanceTaskInstruction, enhanceImmediateSolution } from '../services/geminiService';
 import { ClientReportTemplate, FinalReportTemplate } from './ReportTemplates';
-import { uploadPdfToDrive, closeClaimSimple } from '../services/sheetsService';
+import { uploadPdfToDrive, closeClaimSimple, archiveClaimInSheet } from '../services/sheetsService';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 
@@ -72,27 +72,40 @@ const RoleCard = ({ role, label, desc, icon: Icon, colorClass, onClick }: any) =
 );
 
 type SortOption = 'DATE_DESC' | 'DATE_ASC' | 'ALPHA' | 'STATUS_PENDING' | 'STATUS_CLOSED';
+type AuditFilterType = 'APPROVAL_READY' | 'PENDING_EXECUTION' | 'ACTION_PLAN_PENDING' | 'CLOSURE_READY' | 'HISTORY';
+
+// DATE HELPERS
+const parseDate = (dateStr: string | undefined): Date | null => {
+    if (!dateStr) return null;
+    // Check if it's ISO
+    if (dateStr.includes('T') && dateStr.includes('-')) return new Date(dateStr);
+    // Assume DD/MM/YYYY
+    const parts = dateStr.split('/');
+    if (parts.length === 3) return new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0]));
+    return null;
+};
+
+const getDaysDiff = (start: Date | null, end: Date | null): number => {
+    if (!start || !end) return 0;
+    const diff = Math.abs(end.getTime() - start.getTime());
+    return diff / (1000 * 60 * 60 * 24);
+};
 
 const getDaysPassed = (dateStr: string) => {
-    if (!dateStr) return 0;
-    const parts = dateStr.includes('/') ? dateStr.split('/') : null;
-    const start = parts ? new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0])) : new Date(dateStr);
-    const now = new Date();
-    const diffTime = Math.abs(now.getTime() - start.getTime());
-    return Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    const start = parseDate(dateStr);
+    if (!start) return 0;
+    return Math.floor(getDaysDiff(start, new Date()));
 };
 
 const getDaysBetween = (startStr: string, endStr?: string) => {
-    if (!startStr) return 0;
-    const parts = startStr.includes('/') ? startStr.split('/') : null;
-    const start = parts ? new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0])) : new Date(startStr);
-    const end = endStr ? new Date(endStr) : new Date();
-    const diffTime = Math.abs(end.getTime() - start.getTime());
-    return Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    const start = parseDate(startStr);
+    const end = endStr ? parseDate(endStr) : new Date();
+    if (!start || !end) return 0;
+    return Math.floor(getDaysDiff(start, end));
 };
 
 // Types for the Unified Confirmation Modal
-type ConfirmationType = 'DELETE_TASK' | 'DELETE_MITIGATION' | 'DELETE_CLAIM' | 'APPROVE_PLAN' | 'CLOSE_CASE_DEFINITIVE' | null;
+type ConfirmationType = 'DELETE_TASK' | 'DELETE_MITIGATION' | 'DELETE_CLAIM' | 'APPROVE_PLAN' | 'CLOSE_CASE_DEFINITIVE' | 'ARCHIVE_CLAIM' | null;
 
 export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClaim, onDeleteClaim, onLogout, onRefresh }) => {
   const [currentRole, setCurrentRole] = useState<InternalRole | null>(null);
@@ -101,7 +114,7 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
   const [sortOption, setSortOption] = useState<SortOption>('DATE_DESC');
   
   const [viewMode, setViewMode] = useState<'CLAIMS' | 'INDICATORS'>('CLAIMS');
-  const [auditFilter, setAuditFilter] = useState<'PENDING_APPROVAL' | 'CLOSURE_READY' | 'HISTORY'>('PENDING_APPROVAL');
+  const [auditFilter, setAuditFilter] = useState<AuditFilterType>('APPROVAL_READY');
 
   const [showSLAAlert, setShowSLAAlert] = useState(false);
   const [overdueCases, setOverdueCases] = useState<Claim[]>([]);
@@ -121,6 +134,11 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
   const [isSavingPdf, setIsSavingPdf] = useState(false);
   const [isProcessingAction, setIsProcessingAction] = useState(false); // Generic processing state
   
+  // Indicators State
+  const [indicatorTimeFilter, setIndicatorTimeFilter] = useState<'30' | '60' | '90' | 'ALL' | 'PENDING'>('ALL');
+  const [indicatorCaseFilter, setIndicatorCaseFilter] = useState<string>('GLOBAL');
+  const indicatorsRef = useRef<HTMLDivElement>(null);
+
   // UNIFIED CONFIRMATION MODAL STATE
   const [confirmModal, setConfirmModal] = useState<{ 
       isOpen: boolean, 
@@ -172,7 +190,14 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
   }, [currentRole, claims, hasCheckedSLA]);
 
   const filteredClaims = useMemo(() => {
+    // BASE FILTER: Exclude archived claims UNLESS we are in INDICATORS view (Indicators logic handles its own)
+    // Actually, ViewMode 'CLAIMS' handles the sidebar list.
+    // If archived is true, we generally hide it from the active list.
+    
     let result = claims.filter(c => {
+        // Exclude archived claims from the operational list
+        if (c.archived) return false;
+
         const term = searchTerm.toLowerCase();
         const client = String(c.client || '').toLowerCase();
         const id = String(c.id || '').toLowerCase();
@@ -180,16 +205,57 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
     });
 
     if (currentRole === InternalRole.AUDIT && viewMode === 'CLAIMS') {
-        if (auditFilter === 'PENDING_APPROVAL') {
-            result = result.filter(c => c.mitigationActions?.some(m => m.status === 'Pending' && m.executionNotes));
+        if (auditFilter === 'APPROVAL_READY') {
+            // "Aprobar Soluciones Inmediatas": Casos con soluciones ejecutadas y faltan por aprobación.
+            result = result.filter(c => 
+                c.mitigationActions?.some(m => m.status === 'Pending' && m.executionNotes)
+            );
+        } else if (auditFilter === 'PENDING_EXECUTION') {
+            // "Soluciones Inmediatas Pendientes por Ejecutar": Casos abiertos sin terminar de ejecutar todas sus acciones inmediatas.
+            // O casos sin acciones creadas.
+            result = result.filter(c => {
+                if (c.status === ClaimStatus.CLOSED) return false;
+                // If no actions, it counts as pending execution/definition
+                if (!c.mitigationActions || c.mitigationActions.length === 0) return true;
+                // If any action is Pending AND has no execution notes (meaning not executed)
+                return c.mitigationActions.some(m => m.status === 'Pending' && !m.executionNotes);
+            });
+        } else if (auditFilter === 'ACTION_PLAN_PENDING') {
+            // "Plan de Acción Pendiente": Ya se aprobaron sus soluciones inmediatas (todas), 
+            // pero falta el plan de acción (o no llenado, o no terminado de ejecutar).
+            result = result.filter(c => {
+                if (c.status === ClaimStatus.CLOSED) return false;
+                
+                const hasMitigations = c.mitigationActions && c.mitigationActions.length > 0;
+                const allMitigationsApproved = hasMitigations && c.mitigationActions!.every(m => m.status === 'Approved');
+                
+                if (!allMitigationsApproved) return false; // Must have approved mitigations first
+
+                // Check Action Plan Status
+                const hasTasks = c.tasks && c.tasks.length > 0;
+                const allTasksRealized = hasTasks && c.tasks!.every(t => t.status === 'Realized');
+
+                // Include if: No tasks defined OR Tasks defined but not all realized
+                return !hasTasks || !allTasksRealized;
+            });
         } else if (auditFilter === 'CLOSURE_READY') {
+            // "Tickets Pendientes por Cierre Administrativo": 
+            // Plan de acción ejecutado (todas las tareas asignadas ejecutadas) y soluciones inmediatas aprobadas.
+            // Solo falta aprobar el plan de acción (si no está aprobado) y hacer el cierre definitivo.
             result = result.filter(c => {
                  if (c.status === ClaimStatus.CLOSED) return false;
-                 const allMitigationsApproved = c.mitigationActions && c.mitigationActions.length > 0 && c.mitigationActions.every(m => m.status === 'Approved');
-                 return allMitigationsApproved && c.actionPlanStatus !== 'Approved';
+                 
+                 const hasMitigations = c.mitigationActions && c.mitigationActions.length > 0;
+                 const allMitigationsApproved = hasMitigations && c.mitigationActions!.every(m => m.status === 'Approved');
+                 
+                 const hasTasks = c.tasks && c.tasks.length > 0;
+                 const allTasksRealized = hasTasks && c.tasks!.every(t => t.status === 'Realized');
+
+                 return allMitigationsApproved && allTasksRealized;
             });
         } else if (auditFilter === 'HISTORY') {
-             result = result.filter(c => c.status === ClaimStatus.CLOSED || (c.immediateSolutionStatus === 'Approved' && c.actionPlanStatus === 'Approved'));
+             // "Histórico Solicitudes Cerradas"
+             result = result.filter(c => c.status === ClaimStatus.CLOSED);
         }
     }
 
@@ -220,6 +286,181 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
           return sortOption === 'DATE_ASC' ? timeA - timeB : timeB - timeA;
     });
   }, [claims, searchTerm, sortOption, currentRole, auditFilter, viewMode]);
+
+  // --- INDICATORS LOGIC ---
+  const indicatorsData = useMemo(() => {
+      // 1. Apply Filters
+      let filtered = claims;
+      
+      // Time Filter
+      if (indicatorTimeFilter !== 'ALL') {
+          const now = new Date();
+          filtered = filtered.filter(c => {
+              if (indicatorTimeFilter === 'PENDING') return c.status !== ClaimStatus.CLOSED;
+              
+              // For closed cases, use internalCloseDate, for open, use date (report date)
+              const refDate = c.status === ClaimStatus.CLOSED && c.internalCloseDate ? parseDate(c.internalCloseDate) : parseDate(c.date);
+              if (!refDate) return false;
+              const daysDiff = getDaysDiff(refDate, now);
+              return daysDiff <= parseInt(indicatorTimeFilter);
+          });
+      }
+
+      // Case Filter
+      if (indicatorCaseFilter !== 'GLOBAL') {
+          filtered = filtered.filter(c => c.id === indicatorCaseFilter);
+      }
+
+      // 2. Calculate Metrics
+      let totalMitigationDays = 0;
+      let mitigationCount = 0;
+      
+      let totalPlanTaskDays = 0;
+      let planTaskCount = 0;
+
+      let totalImmediateClosureDays = 0;
+      let immediateClosureCount = 0;
+
+      let totalAdminClosureDays = 0;
+      let adminClosureCount = 0;
+
+      const productFrequency: Record<string, number> = {};
+      const brandFrequency: Record<string, number> = {};
+
+      filtered.forEach(c => {
+          const startDate = parseDate(c.date);
+
+          // 2.1 Mitigation Execution Time (Avg per task)
+          c.mitigationActions?.forEach(m => {
+              if (m.completedAt && m.createdAt) {
+                  const days = getDaysDiff(parseDate(m.createdAt), parseDate(m.completedAt));
+                  totalMitigationDays += days;
+                  mitigationCount++;
+              }
+          });
+
+          // 2.2 Immediate Mitigation Closure (Case Start -> Last Mitigation Approved)
+          if (c.mitigationActions && c.mitigationActions.length > 0) {
+              // Find the last approval date
+              const approvalDates = c.mitigationActions
+                  .map(m => m.approvedAt ? parseDate(m.approvedAt) : null)
+                  .filter(Boolean) as Date[];
+              
+              if (approvalDates.length === c.mitigationActions.length && startDate) {
+                  // All approved
+                  const lastApproval = new Date(Math.max(...approvalDates.map(d => d.getTime())));
+                  totalImmediateClosureDays += getDaysDiff(startDate, lastApproval);
+                  immediateClosureCount++;
+              }
+          }
+
+          // 2.3 Action Plan Tasks Execution (Avg per task)
+          c.tasks?.forEach(t => {
+              if (t.completedAt && t.createdAt) {
+                  const days = getDaysDiff(parseDate(t.createdAt), parseDate(t.completedAt));
+                  totalPlanTaskDays += days;
+                  planTaskCount++;
+              }
+          });
+
+          // 2.4 Administrative Closure (Case Start -> Internal Close Date)
+          if (c.status === ClaimStatus.CLOSED && c.internalCloseDate && startDate) {
+              const closeDate = parseDate(c.internalCloseDate);
+              if (closeDate) {
+                  totalAdminClosureDays += getDaysDiff(startDate, closeDate);
+                  adminClosureCount++;
+              }
+          }
+
+          // 2.5 Product Stats (Parsing separated by | and cleaning quantity)
+          if (c.productRef) {
+              const items = c.productRef.split('|');
+              items.forEach(item => {
+                  // Remove " (Cant: ...)" suffix to group products correctly
+                  const cleanName = item.replace(/\s*\(Cant:.*?\)/i, '').trim();
+                  if (cleanName) {
+                      productFrequency[cleanName] = (productFrequency[cleanName] || 0) + 1;
+                  }
+              });
+          }
+
+          // 2.6 Brand Stats (Parsing separated by |)
+          if ((c as any).brand) { // Type cast to access raw if concatenated
+              const brandStr = String((c as any).brand);
+              const brands = brandStr.split('|');
+              brands.forEach(b => {
+                  const cleanBrand = b.trim();
+                  if (cleanBrand) {
+                      brandFrequency[cleanBrand] = (brandFrequency[cleanBrand] || 0) + 1;
+                  }
+              });
+          }
+      });
+
+      // Sort Products
+      const topProducts = Object.entries(productFrequency)
+          .sort(([, a], [, b]) => b - a)
+          .slice(0, 5);
+
+      // Sort Brands
+      const topBrands = Object.entries(brandFrequency)
+          .sort(([, a], [, b]) => b - a);
+
+      return {
+          totalClaims: filtered.length,
+          totalMitigations: mitigationCount,
+          totalPlanTasks: planTaskCount,
+          avgMitigationExec: mitigationCount ? (totalMitigationDays / mitigationCount).toFixed(1) : '0',
+          avgImmediateClosure: immediateClosureCount ? (totalImmediateClosureDays / immediateClosureCount).toFixed(1) : '0',
+          avgPlanTaskExec: planTaskCount ? (totalPlanTaskDays / planTaskCount).toFixed(1) : '0',
+          avgAdminClosure: adminClosureCount ? (totalAdminClosureDays / adminClosureCount).toFixed(1) : '0',
+          topProducts,
+          topBrands,
+          filteredClaims: filtered
+      };
+  }, [claims, indicatorTimeFilter, indicatorCaseFilter]);
+
+  const downloadIndicatorsPDF = async () => {
+      if(!indicatorsRef.current) return;
+      try {
+          // Force white background for the capture to avoid transparency issues
+          const canvas = await html2canvas(indicatorsRef.current, { 
+              scale: 2,
+              backgroundColor: '#ffffff', 
+              useCORS: true 
+          });
+          
+          const imgData = canvas.toDataURL('image/png');
+          
+          // Use 'l' for Landscape orientation
+          const pdf = new jsPDF('l', 'mm', 'a4');
+          
+          const pdfWidth = pdf.internal.pageSize.getWidth();
+          const pdfHeight = pdf.internal.pageSize.getHeight();
+          
+          const imgProps = pdf.getImageProperties(imgData);
+          
+          // Calculate dimensions to fit WIDTH
+          let printWidth = pdfWidth;
+          let printHeight = (imgProps.height * pdfWidth) / imgProps.width;
+          
+          // If height is still too big for the page, scale down to fit HEIGHT instead (Contain)
+          if (printHeight > pdfHeight) {
+              const scale = pdfHeight / printHeight;
+              printHeight = pdfHeight;
+              printWidth = printWidth * scale;
+          }
+          
+          // Center the image if it was scaled down by height
+          const x = (pdfWidth - printWidth) / 2;
+          
+          pdf.addImage(imgData, 'PNG', x, 0, printWidth, printHeight);
+          pdf.save(`Indicadores_Calidad_${new Date().toISOString().split('T')[0]}.pdf`);
+      } catch (e) {
+          console.error(e);
+          alert("Error generando PDF");
+      }
+  };
 
   const handleRoleSelect = (role: InternalRole) => setCurrentRole(role);
   const handleBack = () => selectedClaim ? setSelectedClaim(null) : setCurrentRole(null);
@@ -300,6 +541,15 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
              } else {
                   alert("Error al cerrar el caso.");
              }
+        } else if (type === 'ARCHIVE_CLAIM') {
+            const success = await archiveClaimInSheet(selectedClaim.id);
+            if (success) {
+                alert("Caso archivado/ocultado de la lista.");
+                setSelectedClaim(null); // Return to list
+                await onRefresh(); // Refresh list
+            } else {
+                alert("Error al archivar el caso.");
+            }
         }
       } catch (e) {
           console.error(e);
@@ -645,29 +895,175 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
   const canApproveActionPlan = !actionPlanBlockingReason;
 
   if (viewMode === 'INDICATORS') {
-      const totalReports = claims.length;
-      const inProgress = claims.filter(c => c.status !== ClaimStatus.CLOSED).length;
-      const closed = claims.filter(c => c.status === ClaimStatus.CLOSED).length;
-      
-      const closedClaims = claims.filter(c => c.status === ClaimStatus.CLOSED);
-      const avgDaysClose = closedClaims.length > 0 
-          ? (closedClaims.reduce((acc, c) => acc + getDaysBetween(c.date, c.internalCloseDate), 0) / closedClaims.length).toFixed(1)
-          : '0';
+      const { 
+          avgMitigationExec, avgImmediateClosure, avgPlanTaskExec, avgAdminClosure,
+          totalClaims, totalMitigations, totalPlanTasks, topProducts, topBrands, filteredClaims 
+      } = indicatorsData;
 
       return (
           <div className="h-screen bg-slate-50 flex flex-col overflow-auto font-sans">
               <div className="p-8 max-w-7xl mx-auto w-full">
-                  <button onClick={() => setViewMode('CLAIMS')} className="mb-6 flex items-center gap-2 text-slate-500 hover:text-slate-800 font-bold"><ArrowRight className="rotate-180" size={20}/> Volver al Tablero</button>
-                  <div className="flex justify-between items-end mb-8">
+                  <div className="flex justify-between items-start mb-8">
                       <div>
-                          <h1 className="text-3xl font-black text-slate-900 flex items-center gap-3"><BarChart3 size={32} className="text-indigo-600"/> Panel de Indicadores</h1>
+                          <button onClick={() => setViewMode('CLAIMS')} className="mb-2 flex items-center gap-2 text-slate-500 hover:text-slate-800 font-bold"><ArrowRight className="rotate-180" size={20}/> Volver al Tablero</button>
+                          <h1 className="text-3xl font-black text-slate-900 flex items-center gap-3"><BarChart3 size={32} className="text-indigo-600"/> Panel de Gestión de Calidad</h1>
                       </div>
+                      <button onClick={downloadIndicatorsPDF} className="bg-slate-900 text-white px-6 py-3 rounded-xl font-bold shadow-lg hover:bg-black transition flex items-center gap-2">
+                          <Download size={20}/> Exportar PDF
+                      </button>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-                      <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100"><p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Total Reportes</p><p className="text-4xl font-black text-slate-800">{totalReports}</p></div>
-                      <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100"><p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">En Curso</p><p className="text-4xl font-black text-orange-500">{inProgress}</p></div>
-                      <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100"><p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Cerrados</p><p className="text-4xl font-black text-green-500">{closed}</p></div>
-                      <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100"><p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Días Prom. Cierre</p><p className="text-4xl font-black text-indigo-600">{avgDaysClose}</p></div>
+
+                  <div ref={indicatorsRef} className="bg-slate-50 p-4 -m-4">
+                      {/* FILTERS */}
+                      <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 mb-6 flex flex-col md:flex-row gap-4 justify-between items-center">
+                          <div className="flex items-center gap-2 bg-slate-50 p-1 rounded-lg border border-slate-200">
+                              {['ALL', '30', '60', '90', 'PENDING'].map(f => (
+                                  <button 
+                                    key={f} 
+                                    onClick={() => setIndicatorTimeFilter(f as any)}
+                                    className={`px-4 py-2 rounded-md text-xs font-bold transition ${indicatorTimeFilter === f ? 'bg-white shadow text-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}
+                                  >
+                                      {f === 'ALL' ? 'Historico Total' : f === 'PENDING' ? 'Pendientes' : `Últimos ${f} días`}
+                                  </button>
+                              ))}
+                          </div>
+                          
+                          <div className="flex items-center gap-2">
+                              <span className="text-xs font-bold text-slate-400 uppercase">Alcance:</span>
+                              <select 
+                                className="bg-white border border-slate-200 text-slate-700 text-sm rounded-lg p-2.5 outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
+                                value={indicatorCaseFilter}
+                                onChange={(e) => setIndicatorCaseFilter(e.target.value)}
+                              >
+                                  <option value="GLOBAL">Global (Toda la Operación)</option>
+                                  {claims.map(c => (
+                                      <option key={c.id} value={c.id}>{c.id} - {c.client}</option>
+                                  ))}
+                              </select>
+                          </div>
+                      </div>
+
+                      {/* KPI CARDS */}
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                          <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex items-center gap-4">
+                              <div className="p-4 bg-blue-50 text-blue-600 rounded-2xl"><FileText size={32}/></div>
+                              <div><p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Total Reclamaciones</p><p className="text-4xl font-black text-slate-800 leading-none">{totalClaims}</p></div>
+                          </div>
+                          <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex items-center gap-4">
+                              <div className="p-4 bg-amber-50 text-amber-600 rounded-2xl"><Zap size={32}/></div>
+                              <div><p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Acciones Mitigación</p><p className="text-4xl font-black text-slate-800 leading-none">{totalMitigations}</p></div>
+                          </div>
+                          <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex items-center gap-4">
+                              <div className="p-4 bg-green-50 text-green-600 rounded-2xl"><ClipboardCheck size={32}/></div>
+                              <div><p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Tareas Plan Acción</p><p className="text-4xl font-black text-slate-800 leading-none">{totalPlanTasks}</p></div>
+                          </div>
+                      </div>
+
+                      {/* MAIN METRICS GRID - SIMPLIFIED FOR PDF READABILITY */}
+                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+                          {/* Time Metrics - BOX LIST */}
+                          <div className="lg:col-span-2 space-y-6">
+                              <h3 className="font-bold text-slate-800 flex items-center gap-2"><Timer size={20} className="text-indigo-600"/> Tiempos de Ciclo Promedio</h3>
+                              
+                              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+                                  {/* Simple Boxes instead of Bars */}
+                                  <div className="flex justify-between items-center p-3 bg-slate-50 rounded-lg border border-slate-200">
+                                      <span className="text-xs font-bold text-slate-600">Ejecución Tarea Mitigación</span>
+                                      <span className="text-sm font-black text-slate-900">{avgMitigationExec} días</span>
+                                  </div>
+
+                                  <div className="flex justify-between items-center p-3 bg-slate-50 rounded-lg border border-slate-200">
+                                      <span className="text-xs font-bold text-slate-600">Cierre Fase Mitigación</span>
+                                      <span className="text-sm font-black text-slate-900">{avgImmediateClosure} días</span>
+                                  </div>
+
+                                  <div className="flex justify-between items-center p-3 bg-slate-50 rounded-lg border border-slate-200">
+                                      <span className="text-xs font-bold text-slate-600">Ejecución Tareas Plan Acción</span>
+                                      <span className="text-sm font-black text-slate-900">{avgPlanTaskExec} días</span>
+                                  </div>
+
+                                  <div className="flex justify-between items-center p-3 bg-indigo-50 rounded-lg border border-indigo-100 mt-2">
+                                      <span className="text-xs font-bold text-indigo-800">Cierre Administrativo Total</span>
+                                      <span className="text-sm font-black text-indigo-900">{avgAdminClosure} días</span>
+                                  </div>
+                              </div>
+                          </div>
+
+                          {/* Stats Column */}
+                          <div className="space-y-6">
+                              {/* Brand Stats - Simple List */}
+                              <div>
+                                  <h3 className="font-bold text-slate-800 flex items-center gap-2 mb-4"><PieChart size={20} className="text-purple-600"/> Distribución por Marca</h3>
+                                  <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                                      {topBrands.length > 0 ? (
+                                          <div className="space-y-0 divide-y divide-slate-100">
+                                              {topBrands.map(([name, count], idx) => (
+                                                  <div key={idx} className="flex justify-between items-center py-3">
+                                                      <span className="text-xs font-bold text-slate-600">{name}</span>
+                                                      <span className="text-sm font-black text-slate-800">{count}</span>
+                                                  </div>
+                                              ))}
+                                          </div>
+                                      ) : <div className="text-center text-slate-400 text-xs italic">Sin datos</div>}
+                                  </div>
+                              </div>
+
+                              {/* Product Stats - Simple Table (No Bars) */}
+                              <div>
+                                  <h3 className="font-bold text-slate-800 flex items-center gap-2 mb-4"><BarChart4 size={20} className="text-indigo-600"/> Top Productos</h3>
+                                  <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-auto">
+                                      {topProducts.length > 0 ? (
+                                          <div className="space-y-0 divide-y divide-slate-100">
+                                              {topProducts.map(([name, count], idx) => (
+                                                  <div key={idx} className="flex justify-between items-start py-3 gap-4">
+                                                      <span className="text-[10px] font-bold text-slate-600 leading-tight w-3/4">{name}</span>
+                                                      <span className="text-sm font-black text-indigo-600">{count}</span>
+                                                  </div>
+                                              ))}
+                                          </div>
+                                      ) : (
+                                          <div className="text-center text-slate-400 py-4 italic text-xs">No hay datos suficientes</div>
+                                      )}
+                                  </div>
+                              </div>
+                          </div>
+                      </div>
+
+                      {/* DETAILED TABLE */}
+                      <div className="mb-8">
+                          <h3 className="font-bold text-slate-800 flex items-center gap-2 mb-4"><ListFilter size={20} className="text-indigo-600"/> Detalle de Casos ({indicatorTimeFilter === 'PENDING' ? 'Pendientes' : 'Cerrados y Filtrados'})</h3>
+                          <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+                              <table className="w-full text-left text-sm">
+                                  <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-[10px] tracking-wider">
+                                      <tr>
+                                          <th className="p-4 text-slate-600">Fecha Inicio</th>
+                                          <th className="p-4 text-slate-600">ID Caso</th>
+                                          <th className="p-4 text-slate-600">Cliente</th>
+                                          <th className="p-4 text-slate-600">Producto</th>
+                                          <th className="p-4 text-slate-600">Estado</th>
+                                          <th className="p-4 text-slate-600">Fecha Cierre</th>
+                                      </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-100">
+                                      {filteredClaims.map(c => (
+                                          <tr key={c.id} className="hover:bg-slate-50 transition">
+                                              <td className="p-4 font-mono text-slate-500 text-xs">{c.date}</td>
+                                              <td className="p-4 font-bold text-slate-700">{c.id}</td>
+                                              <td className="p-4 font-medium text-slate-800">{c.client}</td>
+                                              <td className="p-4 text-xs text-slate-500 max-w-xs truncate" title={c.productRef}>{c.productRef}</td>
+                                              <td className="p-4">
+                                                  <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase border ${c.status === ClaimStatus.CLOSED ? 'bg-green-50 border-green-200 text-green-700' : 'bg-yellow-50 border-yellow-200 text-yellow-700'}`}>
+                                                      {c.status}
+                                                  </span>
+                                              </td>
+                                              <td className="p-4 font-mono text-slate-500 text-xs">{c.internalCloseDate || '-'}</td>
+                                          </tr>
+                                      ))}
+                                  </tbody>
+                              </table>
+                              {filteredClaims.length === 0 && <div className="text-center py-8 text-slate-400 italic">No hay registros para los filtros seleccionados.</div>}
+                          </div>
+                      </div>
                   </div>
               </div>
           </div>
@@ -716,6 +1112,10 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                        <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 text-red-600">
                            <Trash2 size={32} />
                        </div>
+                   ) : (confirmModal.type === 'ARCHIVE_CLAIM') ? (
+                       <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-600">
+                           <EyeOff size={32} />
+                       </div>
                    ) : (
                        <div className="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4 text-indigo-600">
                            <CheckCircle2 size={32} />
@@ -726,6 +1126,7 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                    <h3 className="text-xl font-bold text-slate-800 mb-2">
                        {confirmModal.type === 'APPROVE_PLAN' ? '¿Aprobar Plan de Acción?' : 
                         confirmModal.type === 'CLOSE_CASE_DEFINITIVE' ? '¿Cerrar Caso Definitivamente?' :
+                        confirmModal.type === 'ARCHIVE_CLAIM' ? '¿Ocultar Caso de la Lista?' :
                         '¿Eliminar Elemento?'}
                    </h3>
 
@@ -733,6 +1134,7 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                    <p className="text-sm text-slate-500 mb-6">
                        {confirmModal.type === 'APPROVE_PLAN' ? 'Esto habilitará el cierre administrativo del caso. Verifique que todo esté correcto.' :
                         confirmModal.type === 'CLOSE_CASE_DEFINITIVE' ? 'El caso pasará a estado CERRADO y no se podrán hacer más ediciones.' :
+                        confirmModal.type === 'ARCHIVE_CLAIM' ? 'El caso dejará de ser visible en los listados operativos, pero SE MANTENDRÁ en la base de datos para indicadores.' :
                         'Esta acción es irreversible.'}
                    </p>
 
@@ -742,10 +1144,10 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                            onClick={handleConfirmAction} 
                            disabled={isProcessingAction}
                            className={`flex-1 py-3 text-white rounded-xl font-bold shadow-lg transition flex items-center justify-center gap-2
-                               ${(confirmModal.type?.includes('DELETE')) ? 'bg-red-600 hover:bg-red-700 shadow-red-200' : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200'}
+                               ${(confirmModal.type?.includes('DELETE')) ? 'bg-red-600 hover:bg-red-700 shadow-red-200' : (confirmModal.type === 'ARCHIVE_CLAIM') ? 'bg-slate-700 hover:bg-slate-900 shadow-slate-200' : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200'}
                            `}
                        >
-                           {isProcessingAction ? <Loader2 size={18} className="animate-spin"/> : (confirmModal.type?.includes('DELETE') ? "Eliminar" : "Confirmar")}
+                           {isProcessingAction ? <Loader2 size={18} className="animate-spin"/> : (confirmModal.type?.includes('DELETE') ? "Eliminar" : confirmModal.type === 'ARCHIVE_CLAIM' ? "Ocultar" : "Confirmar")}
                        </button>
                    </div>
                </div>
@@ -811,15 +1213,31 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
           <aside className={`w-full md:w-96 bg-white border-r border-slate-200 overflow-y-auto flex-shrink-0 ${selectedClaim ? 'hidden md:block' : 'block'}`}>
              {currentRole === InternalRole.AUDIT && (
                  <div className="p-6 space-y-4">
-                     <button onClick={() => setAuditFilter('PENDING_APPROVAL')} className={`w-full p-4 rounded-xl flex items-center gap-3 transition font-bold text-left ${auditFilter === 'PENDING_APPROVAL' ? 'bg-orange-500 text-white shadow-lg shadow-orange-200' : 'bg-white text-slate-600 hover:bg-slate-50 border'}`}>
+                     {/* 1. Aprobar Soluciones Inmediatas */}
+                     <button onClick={() => setAuditFilter('APPROVAL_READY')} className={`w-full p-4 rounded-xl flex items-center gap-3 transition font-bold text-left ${auditFilter === 'APPROVAL_READY' ? 'bg-orange-500 text-white shadow-lg shadow-orange-200' : 'bg-white text-slate-600 hover:bg-slate-50 border'}`}>
                          <Zap size={20} /> Aprobar Soluciones Inmediatas
                      </button>
-                     <button onClick={() => setAuditFilter('CLOSURE_READY')} className={`w-full p-4 rounded-xl flex items-center gap-3 transition font-bold text-left ${auditFilter === 'CLOSURE_READY' ? 'bg-green-600 text-white shadow-lg shadow-green-200' : 'bg-white text-slate-600 hover:bg-slate-50 border'}`}>
-                         <CheckCircle2 size={20} /> Tickets Pendientes por Cerrar
+                     
+                     {/* 2. Soluciones Inmediatas Pendientes por Ejecutar */}
+                     <button onClick={() => setAuditFilter('PENDING_EXECUTION')} className={`w-full p-4 rounded-xl flex items-center gap-3 transition font-bold text-left ${auditFilter === 'PENDING_EXECUTION' ? 'bg-yellow-500 text-white shadow-lg shadow-yellow-200' : 'bg-white text-slate-600 hover:bg-slate-50 border'}`}>
+                         <Clock size={20} /> Soluciones Pendientes (Ejecución)
                      </button>
-                     <button onClick={() => setAuditFilter('HISTORY')} className={`w-full p-4 rounded-xl flex items-center gap-3 transition font-bold text-left ${auditFilter === 'HISTORY' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200' : 'bg-white text-slate-600 hover:bg-slate-50 border'}`}>
-                         <CheckCircle2 size={20} /> Histórico Mitigaciones Aprobadas
+
+                     {/* 3. Plan de Acción Pendiente */}
+                     <button onClick={() => setAuditFilter('ACTION_PLAN_PENDING')} className={`w-full p-4 rounded-xl flex items-center gap-3 transition font-bold text-left ${auditFilter === 'ACTION_PLAN_PENDING' ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'bg-white text-slate-600 hover:bg-slate-50 border'}`}>
+                         <ClipboardList size={20} /> Plan de Acción Pendiente
                      </button>
+
+                     {/* 4. Tickets Pendientes por Cierre Administrativo */}
+                     <button onClick={() => setAuditFilter('CLOSURE_READY')} className={`w-full p-4 rounded-xl flex items-center gap-3 transition font-bold text-left ${auditFilter === 'CLOSURE_READY' ? 'bg-purple-600 text-white shadow-lg shadow-purple-200' : 'bg-white text-slate-600 hover:bg-slate-50 border'}`}>
+                         <Lock size={20} /> Tickets Pendientes Cierre Admin.
+                     </button>
+
+                     {/* 5. Histórico Solicitudes Cerradas */}
+                     <button onClick={() => setAuditFilter('HISTORY')} className={`w-full p-4 rounded-xl flex items-center gap-3 transition font-bold text-left ${auditFilter === 'HISTORY' ? 'bg-slate-700 text-white shadow-lg shadow-slate-200' : 'bg-white text-slate-600 hover:bg-slate-50 border'}`}>
+                         <History size={20} /> Histórico Solicitudes Cerradas
+                     </button>
+
                      <div className="pt-4 border-t border-slate-100">
                          <button onClick={() => setViewMode('INDICATORS')} className="w-full py-3 bg-slate-800 text-white rounded-xl font-bold shadow-lg hover:bg-slate-900 transition flex items-center justify-center gap-2">
                              <BarChart3 size={18} /> Ver Indicadores
@@ -863,6 +1281,15 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                                {isAdminRole && (
                                  <>
                                     <button onClick={() => openConfirmModal('DELETE_CLAIM', selectedClaim.id)} className="p-2 text-red-500 hover:bg-red-50 rounded" title="Eliminar Caso"><Trash2 size={20}/></button>
+                                    
+                                    {/* ARCHIVE BUTTON - NEW FEATURE */}
+                                    <button 
+                                        onClick={() => openConfirmModal('ARCHIVE_CLAIM', selectedClaim.id)} 
+                                        className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded" 
+                                        title="Ocultar Caso (Archivar)"
+                                    >
+                                        <EyeOff size={20}/>
+                                    </button>
                                     
                                     {/* BOTÓN 1: SOLO VER INFORME PDF */}
                                     <button onClick={handlePreviewFinalReport} disabled={selectedClaim.immediateSolutionStatus !== 'Approved'} className="px-4 py-2 bg-indigo-600 text-white rounded text-sm font-bold shadow-sm flex gap-2 hover:bg-indigo-700 disabled:opacity-50"><Printer size={16}/> Ver Informe Cierre</button>

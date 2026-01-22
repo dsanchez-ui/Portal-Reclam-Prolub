@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { 
   ChevronRight, 
@@ -148,6 +149,15 @@ export const CommercialWizard: React.FC<CommercialWizardProps> = ({ onSubmit, on
     }
   };
 
+  const detectBrand = (productName: string): string => {
+      if (GULF_PRODUCTS.includes(productName)) return Brand.GULF;
+      if (VALVOLINE_PRODUCTS.includes(productName)) return Brand.VALVOLINE;
+      // Fallback: If current tab is Maquila and product isn't in lists, assume Maquila
+      if (formData.brand === Brand.MAQUILA) return Brand.MAQUILA;
+      // Fallback: Return current tab selection
+      return formData.brand;
+  };
+
   const handleSubmit = () => {
     if (uploadedFiles.length === 0) {
         alert("OBLIGATORIO: Debe adjuntar al menos una evidencia.");
@@ -164,10 +174,15 @@ export const CommercialWizard: React.FC<CommercialWizardProps> = ({ onSubmit, on
     // Construct detailed strings for Sheets storage
     let finalProductRef = '';
     let finalBatch = '';
+    let calculatedBrands = formData.brand as string;
     
     if (claimItems.length > 0) {
         finalProductRef = claimItems.map(i => `${i.productRef} (Cant: ${i.quantity})`).join(' | ');
         finalBatch = claimItems.map(i => i.batch).join(' | ');
+        
+        // Calculate all unique brands involved in this claim
+        const uniqueBrands = new Set(claimItems.map(item => detectBrand(item.productRef)));
+        calculatedBrands = Array.from(uniqueBrands).join(' | ');
     } else {
         // Fallback if no items (should be blocked by validation)
         finalProductRef = "Sin Especificar";
@@ -176,6 +191,7 @@ export const CommercialWizard: React.FC<CommercialWizardProps> = ({ onSubmit, on
 
     onSubmit({
       ...formData,
+      brand: calculatedBrands as Brand, // Type assertion since it might be a concatenated string now
       productRef: finalProductRef,
       batch: finalBatch,
       affectedItems: claimItems, 
@@ -292,7 +308,7 @@ export const CommercialWizard: React.FC<CommercialWizardProps> = ({ onSubmit, on
                                     <input type="radio" name="type" className="hidden" checked={formData.incidentType === IncidentType.QUALITY} onChange={() => handleInputChange('incidentType', IncidentType.QUALITY)} />
                                     <Sparkles size={24} /> <span className="font-bold">Calidad</span>
                                 </label>
-                                <label className={`flex-1 border rounded-xl p-4 flex flex-col items-center gap-2 cursor-pointer transition ${formData.incidentType === IncidentType.LOGISTICS ? 'bg-orange-50 border-orange-500 text-orange-700' : 'hover:bg-slate-50'}`}>
+                                <label className={`flex-1 border rounded-xl p-4 flex flex-col items-center gap-2 cursor-pointer transition ${formData.incidentType === IncidentType.LOGISTICS ? 'bg-orange-900/50 border-orange-500 text-orange-700' : 'hover:bg-slate-50'}`}>
                                     <input type="radio" name="type" className="hidden" checked={formData.incidentType === IncidentType.LOGISTICS} onChange={() => handleInputChange('incidentType', IncidentType.LOGISTICS)} />
                                     <Truck size={24} /> <span className="font-bold">Logística</span>
                                 </label>
