@@ -4,7 +4,7 @@ import { CommercialWizard } from './components/CommercialWizard';
 import { LabDashboard } from './components/LabDashboard';
 import { CommercialDashboard } from './components/CommercialDashboard';
 import { AppView, Claim, ClaimStatus, Brand, IncidentType } from './types';
-import { saveClaimToSheet, updateClaimInSheet, getClaimsFromSheet } from './services/sheetsService';
+import { saveClaimToSheet, updateClaimInSheet, getClaimsFromSheet, deleteClaimFromSheet } from './services/sheetsService';
 import { 
   Briefcase, 
   FlaskConical, 
@@ -231,17 +231,15 @@ export default function App() {
   const handleImprovementSubmit = (data: any, files: File[]) => {
     const id = `IMP-${new Date().getFullYear()}-${Math.floor(Math.random() * 10000)}`;
     
-    // Construct a Claim-like object for the backend
-    // PREFIX CLIENT WITH 'MEJORA - ' to ensure clear folder naming
     const improvementClaim: any = {
       id: id,
       date: new Date().toLocaleDateString('es-ES'),
       status: ClaimStatus.PENDING,
-      client: `MEJORA - ${data.area}`, // Correct prefixing
+      client: `MEJORA - ${data.area}`, 
       reporterName: 'Mejora Continua',
       reporterEmail: '', 
       incidentType: IncidentType.QUALITY,
-      brand: Brand.MAQUILA, // Default placeholder
+      brand: Brand.MAQUILA, 
       productRef: 'N/A',
       batch: 'N/A',
       description: data.description,
@@ -251,18 +249,20 @@ export default function App() {
       tasks: []
     };
 
-    // This will upload files to Drive folder "IMP-XXX - MEJORA - Area" and save to Sheet
     saveClaimToSheet(improvementClaim, files);
-
     showSuccessNotification("¡Reporte Enviado!", "Tu oportunidad de mejora ha sido registrada y los archivos cargados.");
     setCurrentView(AppView.LANDING);
   };
 
   const handleLabUpdate = (updatedClaim: Claim, newFiles: File[] = []) => {
     setClaims(prev => prev.map(c => c.id === updatedClaim.id ? updatedClaim : c));
-    
-    // Update Google Sheet Status (and internal data like tasks) with new Files
     updateClaimInSheet(updatedClaim, newFiles);
+  };
+
+  // NEW: Handle Delete to remove from local state immediately
+  const handleDeleteClaim = (claimId: string) => {
+      setClaims(prev => prev.filter(c => c.id !== claimId));
+      deleteClaimFromSheet(claimId); // Calls backend 'delete' (soft delete)
   };
 
   // Handler for creating new claim from dashboard
@@ -422,7 +422,9 @@ export default function App() {
         <LabDashboard 
           claims={claims} 
           onUpdateClaim={handleLabUpdate} 
-          onLogout={() => setCurrentView(AppView.LANDING)} 
+          onDeleteClaim={handleDeleteClaim} 
+          onLogout={() => setCurrentView(AppView.LANDING)}
+          onRefresh={loadClaims} // NEW PROP
         />
       );
     }

@@ -1,9 +1,10 @@
 
+
 export enum AppView {
   LANDING = 'LANDING',
   COMMERCIAL_DASHBOARD = 'COMMERCIAL_DASHBOARD',
   COMMERCIAL_WIZARD = 'COMMERCIAL_WIZARD',
-  LAB_DASHBOARD = 'LAB_DASHBOARD', // Reused for Internal Management Portal
+  LAB_DASHBOARD = 'LAB_DASHBOARD', 
   IMPROVEMENT = 'IMPROVEMENT'
 }
 
@@ -11,7 +12,7 @@ export enum ClaimStatus {
   PENDING = 'Pendiente',
   ANALYSIS = 'En Análisis',
   ASSIGNED = 'En Plan de Acción',
-  FOR_CLOSURE = 'Por Cerrar', // Ready for HSEQ review
+  FOR_CLOSURE = 'Por Cerrar', 
   CLOSED = 'Cerrado'
 }
 
@@ -28,7 +29,7 @@ export enum IncidentType {
 
 export interface IshikawaEntry {
   id: string;
-  category: string; // Maquinaria, Mano de Obra, etc.
+  category: string; 
   observation: string;
   createdAt: string;
 }
@@ -42,11 +43,11 @@ export interface EvidenceFile {
 
 export interface Task {
   id: string;
-  description: string; // Instruction from Mayerly
-  assignedTo: string; // Manuel, Andrea, Germán, Internal
+  description: string; 
+  assignedTo: string; 
   status: 'Pending' | 'Realized';
-  executionEvidence?: EvidenceFile[]; // Array of files uploaded by execution team
-  executionNotes?: string; // New field for technical report
+  executionEvidence?: EvidenceFile[]; 
+  executionNotes?: string; 
   createdAt: string;
   completedAt?: string;
 }
@@ -69,33 +70,34 @@ export interface Claim {
   incidentType: IncidentType;
   brand: Brand;
   
-  // Legacy single fields (kept for display summaries)
   productRef: string; 
   batch: string;
-  
-  // New Multi-Item field
   affectedItems?: ClaimItem[];
 
   correctionType: string;
-  creditNoteValue?: string; // Nuevo campo para nota crédito
+  creditNoteValue?: string; 
   description: string;
   
-  // Mitigación Inmediata
+  // Immediate Mitigation (Client SLA - 5 Days)
   immediateSolution?: string; 
   immediateSolutionResponsible?: string; 
   immediateSolutionStatus?: 'Pending' | 'Approved' | 'Rejected'; 
   immediateSolutionFeedback?: string; 
-  immediateSolutionExecutionNotes?: string; // Reporte de Andrea/Manuel
-  immediateSolutionExecutionEvidence?: EvidenceFile[]; // Fotos/Videos de Andrea/Manuel
-  
+  immediateSolutionExecutionNotes?: string; 
+  immediateSolutionExecutionEvidence?: EvidenceFile[]; 
+  immediateSolutionDate?: string; // Date when mitigation was approved (stops the 5-day clock)
+
   status: ClaimStatus;
   
-  // Internal Management Fields
+  // Internal Management (Internal SLA - 30 Days)
   ishikawaList?: IshikawaEntry[];
   tasks?: Task[];
   labNotes?: string;
   assignedTo?: string; 
   files?: EvidenceFile[];
+  internalCloseDate?: string;
+  
+  driveFolderUrl?: string;
 }
 
 export interface UserUser {
@@ -104,12 +106,12 @@ export interface UserUser {
 }
 
 export enum InternalRole {
-  LAB = 'Laboratorio (Mayerly)',
-  MAINTENANCE = 'Mantenimiento (Manuel)',
-  PRODUCTION = 'Producción (Andrea)',
-  LOGISTICS = 'Logística (Germán/Javier)',
-  QUALITY_AUX = 'Calidad (Interno)',
-  HSEQ = 'HSEQ (Jenny)',
+  LAB = 'Laboratorio',
+  MAINTENANCE = 'Mantenimiento',
+  PRODUCTION = 'Producción',
+  LOGISTICS = 'Logística',
+  QUALITY_AUX = 'Calidad (Apoyo)',
+  AUDIT = 'Auditoría / Cierre', // Formerly HSEQ
   BILLING = 'Facturación',
   SUPPLY = 'Abastecimiento'
 }
