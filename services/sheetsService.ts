@@ -1,4 +1,5 @@
 
+
 // Remplaza esta URL con la que obtuviste al desplegar tu Google Apps Script
 const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz6A4fiCK1iE1HTOgqHhWEWihPdZ5Yb7Dmm7C5SzZNpNTXLRx1N1NtW_DCQfJatW-Pj/exec'; 
 
@@ -45,6 +46,7 @@ export const saveClaimToSheet = async (claim: any, rawFiles: File[] = []) => {
       rawFiles: processedRawFiles,
       ishikawaList: claim.ishikawaList,
       tasks: claim.tasks,
+      mitigationActions: [], // New claims start empty
       labNotes: claim.labNotes || '', 
       assignedTo: claim.assignedTo || '' 
     };
@@ -73,17 +75,16 @@ export const updateClaimInSheet = async (claim: any, rawFiles: File[] = []) => {
       timestamp: new Date().toISOString(),
       id: claim.id,
       status: claim.status,
-      internalCloseDate: claim.internalCloseDate, // Send close date explicitly
+      internalCloseDate: claim.internalCloseDate, 
       tasks: claim.tasks, 
       ishikawaList: claim.ishikawaList,
       labNotes: claim.labNotes, 
       assignedTo: claim.assignedTo,
-      immediateSolution: claim.immediateSolution,
-      immediateSolutionResponsible: claim.immediateSolutionResponsible,
-      immediateSolutionStatus: claim.immediateSolutionStatus,
-      immediateSolutionFeedback: claim.immediateSolutionFeedback,
-      immediateSolutionExecutionNotes: claim.immediateSolutionExecutionNotes,
-      immediateSolutionExecutionEvidence: claim.immediateSolutionExecutionEvidence,
+      
+      // Send the Array of Actions
+      mitigationActions: claim.mitigationActions || [],
+      
+      actionPlanStatus: claim.actionPlanStatus, 
       rawFiles: processedRawFiles,
       client: claim.client,
       reporterEmail: claim.reporterEmail,
@@ -100,7 +101,6 @@ export const updateClaimInSheet = async (claim: any, rawFiles: File[] = []) => {
   } catch (error) { console.error("Error updating sheet:", error); }
 };
 
-// NEW: Explicit Simple Close
 export const closeClaimSimple = async (id: string, closeDate: string) => {
     try {
         await fetch(GOOGLE_SCRIPT_URL, {
@@ -108,7 +108,7 @@ export const closeClaimSimple = async (id: string, closeDate: string) => {
             mode: 'cors',
             headers: { 'Content-Type': 'text/plain;charset=utf-8' },
             body: JSON.stringify({ 
-                action: 'close_case_simple', 
+                action: 'close_case_definitive', 
                 id: id,
                 date: closeDate
             })

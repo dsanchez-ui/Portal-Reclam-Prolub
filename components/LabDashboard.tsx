@@ -4,9 +4,9 @@ import {
   FlaskConical, Wrench, Factory, Truck, Receipt, Container, ClipboardCheck, ShieldCheck, LogOut, ChevronLeft, 
   Search, Filter, CheckCircle2, Clock, FileText, Save, Plus, Trash2, X, Sparkles, Download, Printer, Zap, Stethoscope,
   Upload, ListFilter, ArrowRight, Activity, AlertTriangle, UserCircle, History, AlertCircle, Eye, BarChart3, TrendingUp, Calendar, ExternalLink, Paperclip, Timer, Users, Image as ImageIcon,
-  ArrowDownUp, FolderOpen, Loader2, Lock, AlertOctagon
+  ArrowDownUp, FolderOpen, Loader2, Lock, AlertOctagon, ThumbsUp
 } from 'lucide-react';
-import { Claim, ClaimStatus, InternalRole, IshikawaEntry, Task, EvidenceFile } from '../types';
+import { Claim, ClaimStatus, InternalRole, IshikawaEntry, Task, EvidenceFile, MitigationAction } from '../types';
 import { enhanceIshikawaObservation, enhanceTaskInstruction, enhanceImmediateSolution } from '../services/geminiService';
 import { ClientReportTemplate, FinalReportTemplate } from './ReportTemplates';
 import { deleteClaimFromSheet, uploadPdfToDrive, closeClaimSimple } from '../services/sheetsService';
@@ -18,15 +18,18 @@ interface LabDashboardProps {
   onUpdateClaim: (claim: Claim, files?: File[]) => void;
   onDeleteClaim: (id: string) => void; 
   onLogout: () => void;
-  onRefresh: () => Promise<void>; // NEW: Ability to trigger full refresh
+  onRefresh: () => Promise<void>; 
 }
 
 // Helper Component for File Thumbnails to handle errors and filenames
-const FileThumbnail = ({ file, onClick }: { file: EvidenceFile, onClick: () => void }) => {
+const FileThumbnail: React.FC<{ file: EvidenceFile, onClick: () => void }> = ({ file, onClick }) => {
     const [imgError, setImgError] = useState(false);
     
-    // Check if it is an image type based on mime type or extension
-    const isImage = file.type?.includes('image') || file.name.match(/\.(jpg|jpeg|png|gif|webp)$/i);
+    // Guard clause: If file is undefined or empty, do not render to avoid crash
+    if (!file) return null;
+
+    const fileName = file.name || 'Archivo sin nombre';
+    const isImage = (file.type && file.type.includes('image')) || (fileName.match(/\.(jpg|jpeg|png|gif|webp)$/i) !== null);
 
     return (
         <div onClick={onClick} className="cursor-pointer group relative bg-white rounded-xl border border-slate-200 hover:border-indigo-400 hover:shadow-md transition-all h-28 w-full flex flex-col items-center justify-between p-2 text-center">
@@ -34,7 +37,7 @@ const FileThumbnail = ({ file, onClick }: { file: EvidenceFile, onClick: () => v
                 {isImage && !imgError ? (
                     <img 
                         src={file.url} 
-                        alt={file.name} 
+                        alt={fileName} 
                         className="w-full h-full object-cover"
                         onError={() => setImgError(true)}
                         crossOrigin="anonymous"
@@ -45,10 +48,9 @@ const FileThumbnail = ({ file, onClick }: { file: EvidenceFile, onClick: () => v
                     </div>
                 )}
             </div>
-            <p className="text-[10px] font-bold text-slate-600 truncate w-full px-1 leading-tight" title={file.name}>
-                {file.name}
+            <p className="text-[10px] font-bold text-slate-600 truncate w-full px-1 leading-tight" title={fileName}>
+                {fileName}
             </p>
-            {/* Hover Indicator */}
             <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
                  <div className="bg-white/90 backdrop-blur rounded-full p-1 shadow-sm text-slate-700">
                     <ExternalLink size={12} />
@@ -95,60 +97,51 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
   const [searchTerm, setSearchTerm] = useState('');
   const [sortOption, setSortOption] = useState<SortOption>('DATE_DESC');
   
-  // Audit View State
   const [viewMode, setViewMode] = useState<'CLAIMS' | 'INDICATORS'>('CLAIMS');
   const [auditFilter, setAuditFilter] = useState<'PENDING_APPROVAL' | 'CLOSURE_READY' | 'HISTORY'>('PENDING_APPROVAL');
 
-  // SLA Modal State
   const [showSLAAlert, setShowSLAAlert] = useState(false);
   const [overdueCases, setOverdueCases] = useState<Claim[]>([]);
   const [hasCheckedSLA, setHasCheckedSLA] = useState(false); 
 
-  // States for Inputs (Creation)
   const [ishikawaInput, setIshikawaInput] = useState({ category: 'Mano de Obra', observation: '' });
   const [taskInput, setTaskInput] = useState({ description: '', assignedTo: 'Mantenimiento' });
   const [immediateInput, setImmediateInput] = useState('');
   const [immediateResponsible, setImmediateResponsible] = useState('Logística');
   
-  // Execution State
   const [executionNote, setExecutionNote] = useState('');
   const [executionFile, setExecutionFile] = useState<File | null>(null);
   const [executingTaskId, setExecutingTaskId] = useState<string | null>(null); 
-  const [isExecutingImmediate, setIsExecutingImmediate] = useState(false); 
-  
+  const [executingMitigationId, setExecutingMitigationId] = useState<string | null>(null); // NEW for Mitigation Execution
+
   const [isEnhancing, setIsEnhancing] = useState(false);
   const [isSavingPdf, setIsSavingPdf] = useState(false);
   const [isClosingCase, setIsClosingCase] = useState(false);
   const printRef = useRef<HTMLDivElement>(null);
   const [reportMode, setReportMode] = useState<'CLIENT' | 'FINAL' | null>(null);
 
-  // 1. Reset SLA Check when Role Changes
   useEffect(() => {
     setHasCheckedSLA(false);
     setShowSLAAlert(false);
   }, [currentRole]);
 
-  // Sync selectedClaim with latest data from props to prevent stale state
   useEffect(() => {
     if (selectedClaim && !isClosingCase) {
         const freshClaim = claims.find(c => c.id === selectedClaim.id);
-        // Only update if references are different but content might be newer
         if (freshClaim && freshClaim !== selectedClaim) {
             setSelectedClaim(freshClaim);
         }
     }
   }, [claims, selectedClaim, isClosingCase]);
 
-  // 2. Perform SLA Check ONLY ONCE per session/role
   useEffect(() => {
     if (currentRole && claims.length > 0 && !hasCheckedSLA) {
-        // Filter overdue cases relevant to the role
         const cases = claims.filter(c => {
             const days = getDaysPassed(c.date);
             if (days < 25) return false;
             
             const roleIsAdmin = currentRole === InternalRole.LAB || currentRole === InternalRole.AUDIT;
-            const pendingMitigation = c.immediateSolutionStatus === 'Pending' && c.immediateSolutionResponsible === currentRole;
+            const pendingMitigation = c.mitigationActions?.some(m => m.assignedTo === currentRole && m.status === 'Pending');
             const pendingTasks = c.tasks?.some(t => t.assignedTo === currentRole && t.status === 'Pending');
             
             if (roleIsAdmin) {
@@ -167,8 +160,6 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
     }
   }, [currentRole, claims, hasCheckedSLA]);
 
-
-  // Filter & Sort Logic
   const filteredClaims = useMemo(() => {
     let result = claims.filter(c => {
         const term = searchTerm.toLowerCase();
@@ -179,17 +170,15 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
 
     if (currentRole === InternalRole.AUDIT && viewMode === 'CLAIMS') {
         if (auditFilter === 'PENDING_APPROVAL') {
-            result = result.filter(c => c.immediateSolutionStatus === 'Pending' && c.immediateSolutionExecutionNotes);
+            result = result.filter(c => c.mitigationActions?.some(m => m.status === 'Pending' && m.executionNotes));
         } else if (auditFilter === 'CLOSURE_READY') {
             result = result.filter(c => {
                  if (c.status === ClaimStatus.CLOSED) return false;
-                 // RELAXED FILTER: Show cases where mitigation is approved AND (no tasks OR all tasks done)
-                 const mitigationApproved = c.immediateSolutionStatus === 'Approved';
-                 const tasksDone = !c.tasks || c.tasks.length === 0 || c.tasks.every(t => t.status === 'Realized');
-                 return mitigationApproved && tasksDone;
+                 const allMitigationsApproved = c.mitigationActions && c.mitigationActions.length > 0 && c.mitigationActions.every(m => m.status === 'Approved');
+                 return allMitigationsApproved && c.actionPlanStatus !== 'Approved';
             });
         } else if (auditFilter === 'HISTORY') {
-             result = result.filter(c => c.status === ClaimStatus.CLOSED || c.immediateSolutionStatus === 'Approved');
+             result = result.filter(c => c.status === ClaimStatus.CLOSED || (c.immediateSolutionStatus === 'Approved' && c.actionPlanStatus === 'Approved'));
         }
     }
 
@@ -224,36 +213,82 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
   const handleRoleSelect = (role: InternalRole) => setCurrentRole(role);
   const handleBack = () => selectedClaim ? setSelectedClaim(null) : setCurrentRole(null);
 
-  // ACTION 1: ONLY PREVIEW PDF (Does NOT close the case)
   const handlePreviewFinalReport = () => {
       setReportMode('FINAL');
   };
 
-  // ACTION 2: ADMINISTRATIVE CLOSURE (SIMPLIFIED & ROBUST)
+  // REFORMULATED VALIDATION: STRICT LINEAR DEPENDENCY
+  const getActionPlanBlockingReason = () => {
+      if (!selectedClaim) return null;
+      // 1. Check Mitigation FIRST
+      if (!selectedClaim.mitigationActions || selectedClaim.mitigationActions.length === 0) return "No hay mitigaciones registradas";
+      if (!selectedClaim.mitigationActions.every(m => m.status === 'Approved')) return "Mitigaciones pendientes por aprobar";
+      
+      // 2. Check Tasks
+      if (!selectedClaim.tasks || selectedClaim.tasks.length === 0) return "No hay tareas creadas";
+      if (!selectedClaim.tasks.every(t => t.status === 'Realized')) return "Tareas pendientes por ejecutar";
+      // 3. Check Ishikawa
+      if (!selectedClaim.ishikawaList || selectedClaim.ishikawaList.length === 0) return "Falta registro en Ishikawa";
+      
+      return null;
+  };
+
+  const handleApproveActionPlan = () => {
+      if (!selectedClaim) return;
+      const reason = getActionPlanBlockingReason();
+      if (reason) {
+          alert(`NO SE PUEDE APROBAR EL PLAN:\n\nMotivo: ${reason}`);
+          return;
+      }
+
+      if (!window.confirm("¿Aprobar Plan de Acción y habilitar cierre definitivo?")) return;
+
+      const updated = {
+          ...selectedClaim,
+          actionPlanStatus: 'Approved' as const
+      };
+      onUpdateClaim(updated);
+      setSelectedClaim(updated);
+  };
+
+  // FINAL CLOSURE - NO VALIDATION, JUST EXECUTION
   const handleFinalClose = async () => {
       if (!selectedClaim) return;
+      
+      if (selectedClaim.actionPlanStatus !== 'Approved') {
+           alert("Debe aprobar el Plan de Acción primero.");
+           return;
+      }
+
       if (!window.confirm("ATENCIÓN: ¿Desea realizar el CIERRE ADMINISTRATIVO?\n\nEsto cambiará el estado a 'Cerrado' en la hoja de cálculo.")) return;
       
       setIsClosingCase(true);
       
-      // 1. Calculate strict Date string DD/MM/YYYY
       const today = new Date();
       const day = today.getDate().toString().padStart(2, '0');
       const month = (today.getMonth() + 1).toString().padStart(2, '0');
       const year = today.getFullYear();
       const formattedDate = `${day}/${month}/${year}`;
 
-      // 2. Call explicit backend action
-      const success = await closeClaimSimple(selectedClaim.id, formattedDate);
-      
-      if (success) {
-          alert("Caso cerrado correctamente. Actualizando datos...");
-          await onRefresh(); // Force reload from sheets
-          setSelectedClaim(null); // Return to list view to see update
-      } else {
-          alert("Error al cerrar el caso.");
+      try {
+          const success = await closeClaimSimple(selectedClaim.id, formattedDate);
+          
+          if (success) {
+              alert("Orden de cierre enviada. Actualizando sistema...");
+              setTimeout(async () => {
+                  await onRefresh();
+                  setSelectedClaim(null);
+                  setIsClosingCase(false);
+              }, 2000);
+          } else {
+              alert("Error de conexión al cerrar el caso.");
+              setIsClosingCase(false);
+          }
+      } catch (e) {
+          console.error(e);
+          alert("Error crítico al cerrar.");
+          setIsClosingCase(false);
       }
-      setIsClosingCase(false);
   };
 
   const handleViewEvidence = (file: { url?: string, base64?: string }) => {
@@ -266,7 +301,7 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
 
   const handleDelete = async () => {
       if (!selectedClaim || !window.confirm("¿CONFIRMA ELIMINAR ESTE CASO DEFINITIVAMENTE?\nEsta acción no se puede deshacer y ocultará el caso de todas las listas.")) return;
-      onDeleteClaim(selectedClaim.id); // Immediate local update
+      onDeleteClaim(selectedClaim.id); 
       setSelectedClaim(null);
   };
 
@@ -278,7 +313,6 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
       }
   };
 
-  // ... [Creation Handlers remain same]
   const saveIshikawa = () => {
     if (!selectedClaim || !ishikawaInput.observation) return;
     const newEntry: IshikawaEntry = {
@@ -310,54 +344,140 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
 
   const handleDeleteTask = (taskId: string) => {
       if (!selectedClaim || !selectedClaim.tasks) return;
-      const taskToCheck = selectedClaim.tasks.find(t => t.id === taskId);
-      if (taskToCheck?.status === 'Realized') {
-          alert("No se puede eliminar una tarea ya ejecutada.");
-          return;
-      }
-      if (!window.confirm("¿Eliminar esta tarea?")) return;
+      // Allow deletion even if executed to let admins fix mistakes
+      if (!window.confirm("¿Confirmar eliminación de esta tarea?")) return;
+      
       const updatedTasks = selectedClaim.tasks.filter(t => t.id !== taskId);
       const updated = { ...selectedClaim, tasks: updatedTasks };
       onUpdateClaim(updated);
       setSelectedClaim(updated);
   };
 
-  const saveImmediate = () => {
+  // --- MITIGATION ACTIONS LOGIC ---
+
+  const addMitigationAction = () => {
       if (!selectedClaim || !immediateInput) return;
       
-      let finalDescription = immediateInput;
-      if (selectedClaim.immediateSolution) {
-          finalDescription = `${selectedClaim.immediateSolution}\n• ${immediateInput}`;
-      } else {
-          finalDescription = `• ${immediateInput}`;
-      }
+      const newAction: MitigationAction = {
+          id: Date.now().toString(),
+          description: immediateInput,
+          assignedTo: immediateResponsible,
+          status: 'Pending',
+          createdAt: new Date().toISOString()
+      };
 
+      const updatedActions = [...(selectedClaim.mitigationActions || []), newAction];
+      
       const updated = { 
           ...selectedClaim, 
-          immediateSolution: finalDescription,
-          immediateSolutionResponsible: immediateResponsible,
+          mitigationActions: updatedActions,
+          // Legacy fields for backward compatibility
+          immediateSolution: updatedActions.map(a => `• ${a.description}`).join('\n'),
           immediateSolutionStatus: 'Pending' as const
       };
+      
       onUpdateClaim(updated);
       setSelectedClaim(updated);
       setImmediateInput(''); 
   };
 
-  const handleDeleteMitigation = () => {
-      if (!selectedClaim) return;
-      if (selectedClaim.immediateSolutionStatus === 'Approved' || selectedClaim.immediateSolutionExecutionNotes) {
-           alert("No se puede eliminar una mitigación ya ejecutada o aprobada.");
-           return;
-      }
-      if (!window.confirm("¿Eliminar asignación de mitigación?")) return;
+  const handleDeleteMitigation = (actionId: string) => {
+      if (!selectedClaim || !selectedClaim.mitigationActions) return;
+      
+      // Allow deletion to fix mistakes (Admin override logic implicitly by button visibility)
+      if (!window.confirm("¿Confirmar eliminación de esta acción de mitigación?")) return;
+      
+      const updatedActions = selectedClaim.mitigationActions.filter(a => a.id !== actionId);
       const updated = {
           ...selectedClaim,
-          immediateSolution: '',
-          immediateSolutionResponsible: '',
-          immediateSolutionStatus: 'Pending' as const,
-          immediateSolutionExecutionNotes: '',
-          immediateSolutionExecutionEvidence: []
+          mitigationActions: updatedActions,
+          // Sync legacy string
+          immediateSolution: updatedActions.map(a => `• ${a.description}`).join('\n'),
       };
+      onUpdateClaim(updated);
+      setSelectedClaim(updated);
+  };
+
+  const handleExecuteMitigation = (actionId: string) => {
+      setExecutingMitigationId(actionId);
+      setExecutionNote('');
+      setExecutionFile(null);
+  };
+
+  const submitMitigationExecution = () => {
+      if (!selectedClaim || !executingMitigationId || !executionNote) {
+          alert("Debe agregar una nota.");
+          return;
+      }
+      
+      const filesToUpload: File[] = [];
+      let newEvidence: EvidenceFile[] = [];
+
+      if (executionFile) {
+           const fileExtension = executionFile.name.split('.').pop();
+           const cleanRole = currentRole?.replace(/[^a-zA-Z0-9]/g, '') || 'User';
+           const newName = `EVIDENCIA_MITIGACION_${cleanRole}_${selectedClaim.id}_${executingMitigationId}.${fileExtension}`;
+           const renamedFile = new File([executionFile], newName, { type: executionFile.type });
+           filesToUpload.push(renamedFile);
+
+           newEvidence.push({
+              name: newName,
+              type: executionFile.type,
+              url: URL.createObjectURL(executionFile),
+              size: executionFile.size
+          });
+      }
+
+      const updatedActions = selectedClaim.mitigationActions?.map(action => {
+          if (action.id === executingMitigationId) {
+              return {
+                  ...action,
+                  executionNotes: executionNote,
+                  executionEvidence: newEvidence,
+                  completedAt: new Date().toISOString()
+              };
+          }
+          return action;
+      });
+
+      const updatedClaim = {
+          ...selectedClaim,
+          mitigationActions: updatedActions
+      };
+      
+      onUpdateClaim(updatedClaim, filesToUpload);
+      setSelectedClaim(updatedClaim);
+      setExecutingMitigationId(null);
+      alert("Mitigación ejecutada.");
+  };
+
+  const approveMitigation = (actionId: string) => {
+      if (!selectedClaim || !selectedClaim.mitigationActions) return;
+      
+      const updatedActions = selectedClaim.mitigationActions.map(action => {
+          if (action.id === actionId) {
+              if (!action.executionNotes) {
+                  alert("No se puede aprobar una acción sin ejecución.");
+                  throw new Error("Validation Error");
+              }
+              return {
+                  ...action,
+                  status: 'Approved' as const,
+                  approvedAt: new Date().toISOString()
+              };
+          }
+          return action;
+      });
+
+      // Update global status if ALL are approved
+      const allApproved = updatedActions.every(a => a.status === 'Approved');
+
+      const updated = { 
+          ...selectedClaim, 
+          mitigationActions: updatedActions,
+          immediateSolutionStatus: allApproved ? 'Approved' as const : 'Pending' as const
+      };
+      
       onUpdateClaim(updated);
       setSelectedClaim(updated);
   };
@@ -413,76 +533,6 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
       alert("Tarea ejecutada y evidencia cargada.");
   };
 
-  const handleExecuteImmediate = () => {
-      setIsExecutingImmediate(true);
-      setExecutionNote('');
-      setExecutionFile(null);
-  };
-
-  const submitImmediateExecution = () => {
-      if (!selectedClaim || !executionNote) {
-          alert("Debe agregar una nota.");
-          return;
-      }
-      
-      const filesToUpload: File[] = [];
-      let newEvidence: EvidenceFile[] = [];
-
-      if (executionFile) {
-           const fileExtension = executionFile.name.split('.').pop();
-           const cleanRole = currentRole?.replace(/[^a-zA-Z0-9]/g, '') || 'User';
-           const newName = `EVIDENCIA_MITIGACION_${cleanRole}_${selectedClaim.id}_${Date.now()}.${fileExtension}`;
-           const renamedFile = new File([executionFile], newName, { type: executionFile.type });
-           filesToUpload.push(renamedFile);
-
-           newEvidence.push({
-              name: newName,
-              type: executionFile.type,
-              url: URL.createObjectURL(executionFile),
-              size: executionFile.size
-          });
-      }
-
-      const now = new Date().toLocaleString('es-CO');
-      const newNoteEntry = `[${now}]: ${executionNote}`;
-      const finalNotes = selectedClaim.immediateSolutionExecutionNotes 
-          ? `${selectedClaim.immediateSolutionExecutionNotes}\n\n${newNoteEntry}`
-          : newNoteEntry;
-
-      const finalEvidence = [
-          ...(selectedClaim.immediateSolutionExecutionEvidence || []),
-          ...newEvidence
-      ];
-
-      const updatedClaim = {
-          ...selectedClaim,
-          immediateSolutionStatus: 'Pending' as const, 
-          immediateSolutionExecutionNotes: finalNotes,
-          immediateSolutionExecutionEvidence: finalEvidence
-      };
-      
-      onUpdateClaim(updatedClaim, filesToUpload);
-      setSelectedClaim(updatedClaim);
-      setIsExecutingImmediate(false);
-      alert("Actualización de Mitigación reportada.");
-  };
-
-  const approveImmediate = () => {
-      if (!selectedClaim) return;
-      if (!selectedClaim.immediateSolutionExecutionNotes) {
-          alert("No se puede aprobar una mitigación que no ha sido ejecutada.");
-          return;
-      }
-      const updated = { 
-          ...selectedClaim, 
-          immediateSolutionStatus: 'Approved' as const,
-          immediateSolutionDate: new Date().toISOString()
-      };
-      onUpdateClaim(updated);
-      setSelectedClaim(updated);
-      setReportMode('CLIENT');
-  };
-
   const downloadPDF = async (action: 'download' | 'drive' = 'download') => {
     if(!printRef.current || !selectedClaim) return;
     
@@ -528,7 +578,6 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
         if (action === 'download') {
             pdf.save(fileName);
         } else {
-            // Save to Drive
             const pdfBlob = pdf.output('blob');
             const reader = new FileReader();
             reader.readAsDataURL(pdfBlob);
@@ -607,18 +656,8 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
       return canExecute(t.assignedTo); 
   }) || [];
   
-  // LOGIC FIX: Determine blocking reasons for closure
-  const getClosureBlockingReason = () => {
-      if (!selectedClaim) return null;
-      if (selectedClaim.immediateSolutionStatus !== 'Approved') return "Mitigación no aprobada";
-      if (selectedClaim.tasks && selectedClaim.tasks.length > 0 && !selectedClaim.tasks.every(t => t.status === 'Realized')) return "Tareas pendientes";
-      // ENFORCED: Must have at least 1 Ishikawa item
-      if (!selectedClaim.ishikawaList || selectedClaim.ishikawaList.length === 0) return "Falta registro en Ishikawa";
-      return null;
-  };
-
-  const blockingReason = getClosureBlockingReason();
-  const canCloseClaim = !blockingReason;
+  const actionPlanBlockingReason = getActionPlanBlockingReason();
+  const canApproveActionPlan = !actionPlanBlockingReason;
 
   if (viewMode === 'INDICATORS') {
       const totalReports = claims.length;
@@ -796,30 +835,16 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                                     {/* BOTÓN 1: SOLO VER INFORME PDF */}
                                     <button onClick={handlePreviewFinalReport} disabled={selectedClaim.immediateSolutionStatus !== 'Approved'} className="px-4 py-2 bg-indigo-600 text-white rounded text-sm font-bold shadow-sm flex gap-2 hover:bg-indigo-700 disabled:opacity-50"><Printer size={16}/> Ver Informe Cierre</button>
                                     
-                                    {/* BOTÓN 2: CIERRE ADMINISTRATIVO MEJORADO */}
-                                    {currentRole === InternalRole.AUDIT && selectedClaim.status !== ClaimStatus.CLOSED && (
-                                        <div className="relative group">
-                                            <button 
-                                                onClick={handleFinalClose} 
-                                                disabled={isClosingCase || !canCloseClaim}
-                                                className={`px-4 py-2 rounded text-sm font-bold shadow-sm flex gap-2 transition-all ${
-                                                    !canCloseClaim 
-                                                    ? 'bg-slate-200 text-slate-400 cursor-not-allowed border border-slate-300' 
-                                                    : 'bg-slate-800 text-white hover:bg-black hover:shadow-md hover:-translate-y-0.5'
-                                                }`}
-                                            >
-                                                {isClosingCase ? <Loader2 className="animate-spin" size={16}/> : !canCloseClaim ? <Lock size={16}/> : <Lock size={16}/>}
-                                                Cierre Definitivo
-                                            </button>
-                                            
-                                            {/* Tooltip for blocking reason */}
-                                            {!canCloseClaim && (
-                                                <div className="absolute top-full mt-2 right-0 w-48 bg-slate-800 text-white text-[10px] p-2 rounded shadow-lg z-50 flex items-center gap-2">
-                                                    <AlertOctagon size={14} className="text-red-400 shrink-0"/>
-                                                    <span>{blockingReason}</span>
-                                                </div>
-                                            )}
-                                        </div>
+                                    {/* MODIFIED BUTTON 2B: CIERRE DEFINITIVO (SOLO APARECE SI PLAN APROBADO) */}
+                                    {currentRole === InternalRole.AUDIT && selectedClaim.status !== ClaimStatus.CLOSED && selectedClaim.actionPlanStatus === 'Approved' && (
+                                        <button 
+                                            onClick={handleFinalClose} 
+                                            disabled={isClosingCase}
+                                            className="px-4 py-2 bg-slate-800 text-white rounded text-sm font-bold shadow-sm flex gap-2 hover:bg-black hover:shadow-md hover:-translate-y-0.5 transition-all"
+                                        >
+                                            {isClosingCase ? <Loader2 className="animate-spin" size={16}/> : <Lock size={16}/>}
+                                            Cierre Definitivo
+                                        </button>
                                     )}
                                     
                                     {/* BOTÓN 3: REPORTE CLIENTE */}
@@ -834,6 +859,7 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                            <div className="flex gap-2 mb-6">
                               {(() => {
                                   const daysOpen = getDaysPassed(selectedClaim.date);
+                                  // Global SLA Met check: based on derived status
                                   const clientSlaMet = selectedClaim.immediateSolutionStatus === 'Approved';
                                   return (
                                     <>
@@ -906,86 +932,105 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                    </div>
 
                    {/* --- SECTIONS (MITIGATION, ISHIKAWA, TASKS) --- */}
-                   {/* [Sections preserved, only key updates shown above] */}
-                   {/* 1. MITIGATION SECTION */}
+                   {/* 1. MITIGATION SECTION - REFACTORED TO LIST ITEMS */}
                    <div className={`p-6 rounded-xl shadow-sm border ${selectedClaim.immediateSolutionStatus === 'Approved' ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200'}`}>
-                      {/* ... (Existing Mitigation Logic) ... */}
                       <div className="flex justify-between items-center mb-4">
                           <h3 className={`text-lg font-bold flex items-center gap-2 ${selectedClaim.immediateSolutionStatus === 'Approved' ? 'text-green-900' : 'text-amber-900'}`}><Zap size={20}/> Acción de Mitigación Inmediata</h3>
                           {selectedClaim.immediateSolutionStatus === 'Approved' && <span className="text-xs font-bold bg-green-200 text-green-800 px-2 py-1 rounded flex items-center gap-1"><CheckCircle2 size={12}/> Mitigado / Aprobado</span>}
                       </div>
                       
-                      {isAdminRole && selectedClaim.immediateSolutionStatus !== 'Approved' && (
+                      {isAdminRole && selectedClaim.status !== ClaimStatus.CLOSED && (
                           <div className="space-y-3 border-b border-amber-200 pb-4 mb-4">
-                             {selectedClaim.immediateSolution && <p className="text-xs text-amber-700 font-bold mb-1">Agregar nueva instrucción:</p>}
+                             <p className="text-xs text-amber-700 font-bold mb-1">Agregar nueva instrucción:</p>
                              <div className="flex gap-2">
                                 <select className="p-3 rounded-lg border border-amber-200 bg-white text-slate-900 w-40" value={immediateResponsible} onChange={e => setImmediateResponsible(e.target.value)}>
                                     <option>Logística</option><option>Facturación</option><option>Calidad</option><option>Mantenimiento</option><option>Abastecimiento</option>
                                 </select>
                                 <input className="flex-1 p-3 rounded-lg border border-amber-200 bg-white text-slate-900 placeholder-slate-400" placeholder="Definir acción de mitigación..." value={immediateInput} onChange={e => setImmediateInput(e.target.value)} />
                                 <button onClick={() => handleEnhance('immediate')} disabled={isEnhancing} className="p-2 text-amber-600 hover:bg-amber-100 rounded-full transition"><Sparkles size={18}/></button>
-                                <button onClick={saveImmediate} className="bg-amber-500 text-white px-6 rounded-lg font-bold shadow-sm hover:bg-amber-600 transition">{selectedClaim.immediateSolution ? "Agregar" : "Asignar"}</button>
+                                <button onClick={addMitigationAction} className="bg-amber-500 text-white px-6 rounded-lg font-bold shadow-sm hover:bg-amber-600 transition">Asignar</button>
                              </div>
                           </div>
                       )}
 
-                      {selectedClaim.immediateSolution ? (
-                          <div className="bg-white p-4 rounded-xl border border-amber-100 shadow-sm">
-                              <div className="flex justify-between items-start">
-                                  <div className="w-full">
-                                      <div className="font-medium text-amber-900 text-sm mb-2 whitespace-pre-wrap leading-relaxed">{selectedClaim.immediateSolution}</div>
-                                      <span className="text-amber-700 font-bold text-xs bg-amber-50 px-2 py-1 rounded">Responsable: {selectedClaim.immediateSolutionResponsible}</span>
-                                  </div>
-                                  {isAdminRole && selectedClaim.immediateSolutionStatus === 'Pending' && !selectedClaim.immediateSolutionExecutionNotes && (
-                                     <button onClick={handleDeleteMitigation} className="text-red-300 hover:text-red-500 p-1 hover:bg-red-50 rounded transition"><Trash2 size={16} /></button>
-                                  )}
-                              </div>
-                              <div className="mt-4">
-                                  {canExecute(selectedClaim.immediateSolutionResponsible) && selectedClaim.immediateSolutionStatus === 'Pending' && !isExecutingImmediate && (
-                                      <button onClick={handleExecuteImmediate} className="bg-amber-600 text-white px-4 py-2 rounded-lg font-bold text-xs hover:bg-amber-700 transition flex items-center gap-2 animate-pulse shadow-lg shadow-amber-200">
-                                          <CheckCircle2 size={14}/> {selectedClaim.immediateSolutionExecutionNotes ? "AGREGAR REPORTE / BITÁCORA" : "EJECUTAR MITIGACIÓN"}
-                                      </button>
-                                  )}
-                                  {currentRole === InternalRole.AUDIT && selectedClaim.immediateSolutionExecutionNotes && selectedClaim.immediateSolutionStatus === 'Pending' && (
-                                       <button onClick={approveImmediate} className="w-full py-3 bg-green-600 text-white font-bold rounded-lg shadow-lg hover:bg-green-700 transition flex items-center justify-center gap-2">
-                                           <CheckCircle2 size={20} /> Aprobar y Generar PDF
-                                       </button>
-                                  )}
-                              </div>
-                              {isExecutingImmediate && (
-                                  <div className="mt-4 bg-slate-50 p-4 rounded-lg border border-slate-200 animate-fadeIn">
-                                      <h4 className="font-bold text-slate-700 mb-2 text-sm">Reportar Ejecución</h4>
-                                      <textarea className="w-full p-2 border rounded mb-2 text-sm bg-white text-slate-900" placeholder="Describa qué se hizo..." rows={2} value={executionNote} onChange={e => setExecutionNote(e.target.value)}/>
-                                      <div className="flex gap-2 items-center">
-                                          <input type="file" className="text-xs" onChange={e => setExecutionFile(e.target.files?.[0] || null)} />
-                                          <button onClick={submitImmediateExecution} className="bg-green-600 text-white px-4 py-2 rounded text-xs font-bold">Confirmar</button>
-                                          <button onClick={() => setIsExecutingImmediate(false)} className="text-slate-500 px-3 text-xs underline">Cancelar</button>
+                      <div className="space-y-4">
+                          {selectedClaim.mitigationActions && selectedClaim.mitigationActions.length > 0 ? (
+                              selectedClaim.mitigationActions.map((action) => (
+                                  <div key={action.id} className={`bg-white p-4 rounded-xl border shadow-sm ${action.status === 'Approved' ? 'border-green-200 bg-green-50/20' : 'border-amber-100'}`}>
+                                      <div className="flex justify-between items-start mb-2">
+                                          <div className="flex-1">
+                                              <div className="font-medium text-amber-900 text-sm mb-1 whitespace-pre-wrap">{action.description}</div>
+                                              <div className="flex gap-2">
+                                                  <span className="text-amber-700 font-bold text-xs bg-amber-50 px-2 py-0.5 rounded">Resp: {action.assignedTo}</span>
+                                                  <span className={`text-xs font-bold px-2 py-0.5 rounded ${action.status === 'Approved' ? 'bg-green-200 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
+                                                      {action.status === 'Approved' ? 'APROBADO' : 'PENDIENTE'}
+                                                  </span>
+                                              </div>
+                                          </div>
+                                          {isAdminRole && (
+                                              <button onClick={() => handleDeleteMitigation(action.id)} className="text-red-300 hover:text-red-500 p-1 hover:bg-red-50 rounded transition"><Trash2 size={16} /></button>
+                                          )}
                                       </div>
-                                  </div>
-                              )}
-                              {selectedClaim.immediateSolutionExecutionNotes && (
-                                  <div className="mt-3 pt-3 border-t border-amber-100 text-sm text-slate-600">
-                                      <p className="font-bold text-green-700 mb-1 text-xs uppercase tracking-wide">Bitácora de Ejecución:</p>
-                                      <div className="whitespace-pre-wrap text-xs bg-slate-50 p-2 rounded border border-slate-100 font-mono text-slate-700">{selectedClaim.immediateSolutionExecutionNotes}</div>
-                                      {selectedClaim.immediateSolutionExecutionEvidence && selectedClaim.immediateSolutionExecutionEvidence.length > 0 && (
-                                         <div className="mt-2 flex justify-end">
-                                             <button onClick={() => handleViewEvidence(selectedClaim.immediateSolutionExecutionEvidence![selectedClaim.immediateSolutionExecutionEvidence!.length - 1])} className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 px-2 py-1 rounded flex items-center gap-1">
-                                                 <Eye size={12}/> Ver Última Evidencia
-                                             </button>
-                                         </div>
+
+                                      {/* Execution Button */}
+                                      {canExecute(action.assignedTo) && action.status === 'Pending' && executingMitigationId !== action.id && (
+                                          <div className="mt-2">
+                                              <button onClick={() => handleExecuteMitigation(action.id)} className="bg-amber-600 text-white px-4 py-2 rounded-lg font-bold text-xs hover:bg-amber-700 transition flex items-center gap-2 shadow-lg shadow-amber-200">
+                                                  <CheckCircle2 size={14}/> {action.executionNotes ? "EDITAR REPORTE" : "EJECUTAR ACCIÓN"}
+                                              </button>
+                                          </div>
+                                      )}
+
+                                      {/* Execution Form */}
+                                      {executingMitigationId === action.id && (
+                                          <div className="mt-4 bg-slate-50 p-4 rounded-lg border border-slate-200 animate-fadeIn">
+                                              <h4 className="font-bold text-slate-700 mb-2 text-sm">Reportar Ejecución</h4>
+                                              <textarea className="w-full p-2 border rounded mb-2 text-sm bg-white text-slate-900" placeholder="Describa qué se hizo..." rows={2} value={executionNote} onChange={e => setExecutionNote(e.target.value)}/>
+                                              <div className="flex gap-2 items-center">
+                                                  <input type="file" className="text-xs" onChange={e => setExecutionFile(e.target.files?.[0] || null)} />
+                                                  <button onClick={submitMitigationExecution} className="bg-green-600 text-white px-4 py-2 rounded text-xs font-bold">Confirmar</button>
+                                                  <button onClick={() => setExecutingMitigationId(null)} className="text-slate-500 px-3 text-xs underline">Cancelar</button>
+                                              </div>
+                                          </div>
+                                      )}
+
+                                      {/* Notes & Evidence */}
+                                      {action.executionNotes && (
+                                          <div className="mt-3 pt-3 border-t border-amber-100 text-sm text-slate-600">
+                                              <p className="font-bold text-green-700 mb-1 text-xs uppercase tracking-wide">Ejecución:</p>
+                                              <div className="whitespace-pre-wrap text-xs bg-slate-50 p-2 rounded border border-slate-100 font-mono text-slate-700">{action.executionNotes}</div>
+                                              
+                                              <div className="flex justify-between items-end mt-2">
+                                                  {action.executionEvidence && action.executionEvidence.length > 0 ? (
+                                                      <button onClick={() => handleViewEvidence(action.executionEvidence![action.executionEvidence!.length - 1])} className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 px-2 py-1 rounded flex items-center gap-1">
+                                                          <Eye size={12}/> Ver Evidencia
+                                                      </button>
+                                                  ) : <span></span>}
+
+                                                  {/* APPROVAL BUTTON PER ITEM */}
+                                                  {currentRole === InternalRole.AUDIT && action.status === 'Pending' && (
+                                                      <button onClick={() => approveMitigation(action.id)} className="bg-green-600 text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-green-700 transition flex items-center gap-1 shadow-sm">
+                                                          <CheckCircle2 size={12}/> Aprobar Item
+                                                      </button>
+                                                  )}
+                                              </div>
+                                          </div>
                                       )}
                                   </div>
-                              )}
-                          </div>
-                      ) : (
-                          !isAdminRole && <p className="text-slate-400 italic text-center text-sm py-2">Sin mitigación definida.</p>
-                      )}
+                              ))
+                          ) : (
+                              !isAdminRole && <p className="text-slate-400 italic text-center text-sm py-2">Sin mitigación definida.</p>
+                          )}
+                      </div>
                    </div>
 
-                   {/* 2. ISHIKAWA & 3. TASKS (Already correct in previous files, kept here for context) */}
-                   <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                      <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2"><Stethoscope size={20} className="text-indigo-600"/> Análisis de Causa (Ishikawa)</h3>
-                      {isAdminRole && selectedClaim.status !== ClaimStatus.CLOSED && (
+                   {/* 2. ISHIKAWA */}
+                   <div className={`bg-white p-6 rounded-xl shadow-sm border ${selectedClaim.actionPlanStatus === 'Approved' ? 'border-green-200 bg-green-50/20' : 'border-slate-200'}`}>
+                      <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                        <Stethoscope size={20} className="text-indigo-600"/> Análisis de Causa (Ishikawa)
+                        {selectedClaim.actionPlanStatus === 'Approved' && <span className="ml-auto text-xs font-bold text-green-600 bg-green-100 px-2 py-1 rounded">Aprobado</span>}
+                      </h3>
+                      {isAdminRole && selectedClaim.status !== ClaimStatus.CLOSED && selectedClaim.actionPlanStatus !== 'Approved' && (
                         <div className="flex gap-3 mb-4">
                            <select className="p-3 border border-slate-200 rounded-lg text-sm bg-white text-slate-900" value={ishikawaInput.category} onChange={e => setIshikawaInput({...ishikawaInput, category: e.target.value})}>
                               <option>Mano de Obra</option><option>Maquinaria</option><option>Materiales</option><option>Método</option><option>Medio Ambiente</option>
@@ -1008,12 +1053,16 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                       </div>
                    </div>
 
-                   <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                   {/* 3. TASKS */}
+                   <div className={`bg-white p-6 rounded-xl shadow-sm border ${selectedClaim.actionPlanStatus === 'Approved' ? 'border-green-200 bg-green-50/20' : 'border-slate-200'}`}>
                       <div className="flex justify-between items-center mb-4">
-                         <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2"><ClipboardCheck size={20} className="text-indigo-600"/> Plan de Acción</h3>
+                         <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                            <ClipboardCheck size={20} className="text-indigo-600"/> Plan de Acción
+                            {selectedClaim.actionPlanStatus === 'Approved' && <span className="ml-auto text-xs font-bold text-green-600 bg-green-100 px-2 py-1 rounded">Aprobado</span>}
+                         </h3>
                          {!isAdminRole && <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded font-bold">Mis Tareas</span>}
                       </div>
-                      {isAdminRole && selectedClaim.status !== ClaimStatus.CLOSED && (
+                      {isAdminRole && selectedClaim.status !== ClaimStatus.CLOSED && selectedClaim.actionPlanStatus !== 'Approved' && (
                           <div className="flex gap-3 mb-6 bg-slate-50 p-3 rounded-xl border border-slate-100">
                              <select className="p-3 border border-slate-200 rounded-lg text-sm bg-white text-slate-900" value={taskInput.assignedTo} onChange={e => setTaskInput({...taskInput, assignedTo: e.target.value})}>
                                 <option>Mantenimiento</option><option>Producción</option><option>Logística</option><option>Calidad</option><option>Facturación</option><option>Abastecimiento</option>
@@ -1035,7 +1084,7 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${t.status === 'Realized' ? 'bg-green-200 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
                                              {t.status === 'Realized' ? 'EJECUTADO' : 'PENDIENTE'}
                                          </span>
-                                         {isAdminRole && t.status === 'Pending' && <button onClick={() => handleDeleteTask(t.id)} className="text-slate-300 hover:text-red-500 p-1"><Trash2 size={14}/></button>}
+                                         {isAdminRole && selectedClaim.actionPlanStatus !== 'Approved' && <button onClick={() => handleDeleteTask(t.id)} className="text-slate-300 hover:text-red-500 p-1"><Trash2 size={14}/></button>}
                                      </div>
                                  </div>
                                  {t.status === 'Pending' && canExecute(t.assignedTo) && executingTaskId !== t.id && (
@@ -1068,6 +1117,18 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                              </div>
                          )) : <div className="text-center py-10 text-slate-400 bg-slate-50/50 rounded-xl border border-dashed border-slate-200"><ClipboardCheck size={32} className="mx-auto mb-2 opacity-50"/><p className="text-sm">No tienes tareas asignadas en este caso.</p></div>}
                       </div>
+                      
+                      {/* BUTTON MOVED HERE: APPROVE ACTION PLAN */}
+                      {currentRole === InternalRole.AUDIT && selectedClaim.status !== ClaimStatus.CLOSED && selectedClaim.actionPlanStatus !== 'Approved' && canApproveActionPlan && (
+                          <div className="mt-6 flex justify-end border-t border-slate-100 pt-4">
+                               <button 
+                                   onClick={handleApproveActionPlan}
+                                   className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold shadow-lg shadow-blue-200 hover:bg-blue-700 transition flex items-center gap-2"
+                               >
+                                   <ThumbsUp size={18}/> Aprobar Plan de Acción
+                               </button>
+                          </div>
+                      )}
                    </div>
                 </div>
              ) : <div className="text-center text-slate-400 py-20"><Filter size={48} className="mx-auto mb-4 opacity-50"/><p>Seleccione un caso</p></div>}

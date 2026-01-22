@@ -52,6 +52,18 @@ export interface Task {
   completedAt?: string;
 }
 
+export interface MitigationAction {
+  id: string;
+  description: string;
+  assignedTo: string; // Previously 'responsible'
+  status: 'Pending' | 'Approved'; // Individual status
+  executionNotes?: string;
+  executionEvidence?: EvidenceFile[];
+  completedAt?: string; // Date of execution
+  approvedAt?: string; // Date of approval
+  createdAt: string;
+}
+
 export interface ClaimItem {
   id: string;
   productRef: string;
@@ -79,19 +91,18 @@ export interface Claim {
   description: string;
   
   // Immediate Mitigation (Client SLA - 5 Days)
-  immediateSolution?: string; 
-  immediateSolutionResponsible?: string; 
+  // UPDATED: Now supports multiple independent actions
+  mitigationActions?: MitigationAction[];
+  
+  // Legacy fields kept for temporary compatibility/display logic, but source of truth is mitigationActions
   immediateSolutionStatus?: 'Pending' | 'Approved' | 'Rejected'; 
-  immediateSolutionFeedback?: string; 
-  immediateSolutionExecutionNotes?: string; 
-  immediateSolutionExecutionEvidence?: EvidenceFile[]; 
-  immediateSolutionDate?: string; // Date when mitigation was approved (stops the 5-day clock)
 
   status: ClaimStatus;
   
   // Internal Management (Internal SLA - 30 Days)
   ishikawaList?: IshikawaEntry[];
   tasks?: Task[];
+  actionPlanStatus?: 'Pending' | 'Approved'; 
   labNotes?: string;
   assignedTo?: string; 
   files?: EvidenceFile[];

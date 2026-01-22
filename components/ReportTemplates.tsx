@@ -19,7 +19,8 @@ const categorizeFiles = (files: EvidenceFile[] | undefined) => {
 
 export const ClientReportTemplate: React.FC<ReportProps> = ({ claim }) => {
   // Combine Initial Files and Mitigation Evidence
-  const allFiles = [...(claim.files || []), ...(claim.immediateSolutionExecutionEvidence || [])];
+  const mitigationEvidence = claim.mitigationActions?.flatMap(m => m.executionEvidence || []) || [];
+  const allFiles = [...(claim.files || []), ...mitigationEvidence];
   const { images, docs } = categorizeFiles(allFiles);
   
   // Display up to 6 images in the report grid
@@ -111,12 +112,21 @@ export const ClientReportTemplate: React.FC<ReportProps> = ({ claim }) => {
          <div className="bg-orange-200 font-bold p-1 border-b border-black text-center uppercase text-[10px] text-black">4. Plan de Acción y Solución</div>
          <div className="p-4 space-y-4">
              <div>
-                <strong className="block mb-2 underline uppercase text-[10px] text-black">Acción Inmediata Tomada:</strong>
-                <p className="text-sm mb-2 text-black">{claim.immediateSolution || 'En proceso de gestión.'}</p>
-                {claim.immediateSolutionExecutionNotes && (
-                    <div className="mt-3 text-xs bg-slate-50 p-3 border border-slate-300 rounded text-black">
-                        <strong>Nota de Ejecución:</strong> {claim.immediateSolutionExecutionNotes}
-                    </div>
+                <strong className="block mb-2 underline uppercase text-[10px] text-black">Acción(es) Inmediata(s) Tomada(s):</strong>
+                
+                {claim.mitigationActions && claim.mitigationActions.length > 0 ? (
+                    claim.mitigationActions.map((action, idx) => (
+                        <div key={idx} className="mb-3 border-l-2 border-slate-300 pl-2">
+                            <p className="text-sm mb-1 text-black font-medium">{idx + 1}. {action.description}</p>
+                            {action.executionNotes && (
+                                <div className="text-[10px] text-slate-600 bg-slate-50 p-1 rounded">
+                                    <strong>Nota de Ejecución:</strong> {action.executionNotes}
+                                </div>
+                            )}
+                        </div>
+                    ))
+                ) : (
+                    <p className="text-sm mb-2 text-black">{claim.immediateSolution || 'En proceso de gestión.'}</p>
                 )}
              </div>
          </div>
@@ -171,7 +181,8 @@ export const ClientReportTemplate: React.FC<ReportProps> = ({ claim }) => {
 };
 
 export const FinalReportTemplate: React.FC<ReportProps> = ({ claim }) => {
-  const allFiles = [...(claim.files || []), ...(claim.immediateSolutionExecutionEvidence || [])];
+  const mitigationEvidence = claim.mitigationActions?.flatMap(m => m.executionEvidence || []) || [];
+  const allFiles = [...(claim.files || []), ...mitigationEvidence];
   const { images } = categorizeFiles(allFiles);
 
   return (
@@ -225,14 +236,33 @@ export const FinalReportTemplate: React.FC<ReportProps> = ({ claim }) => {
 
        <div className="mb-6">
           <h3 className="font-bold text-white bg-indigo-900 p-2 mb-2 uppercase text-[10px]">2. Acción de Mitigación Inmediata</h3>
-          <div className="p-4 border border-slate-200 rounded mb-2">
-             <p className="font-bold text-sm">{claim.immediateSolution}</p>
-             <p className="text-[10px] text-slate-500 mt-2">Responsable: {claim.immediateSolutionResponsible}</p>
-          </div>
-          {claim.immediateSolutionExecutionNotes && (
-             <div className="ml-4 p-3 bg-green-50 border-l-4 border-green-500 text-xs">
-                <strong>Ejecución:</strong> {claim.immediateSolutionExecutionNotes}
-             </div>
+          {claim.mitigationActions && claim.mitigationActions.length > 0 ? (
+              <div className="space-y-2">
+                  {claim.mitigationActions.map((action, idx) => (
+                      <div key={idx} className="p-2 border border-slate-200 rounded">
+                          <p className="font-bold text-sm mb-1">{action.description}</p>
+                          <div className="flex justify-between text-[10px] text-slate-500">
+                              <span>Responsable: {action.assignedTo}</span>
+                              <span>Estado: {action.status === 'Approved' ? 'APROBADO' : 'PENDIENTE'}</span>
+                          </div>
+                          {action.executionNotes && (
+                             <div className="mt-1 p-1 bg-green-50 border-l-2 border-green-500 text-[10px]">
+                                <strong>Ejecución:</strong> {action.executionNotes}
+                             </div>
+                          )}
+                      </div>
+                  ))}
+              </div>
+          ) : (
+              <div className="p-4 border border-slate-200 rounded mb-2">
+                 <p className="font-bold text-sm">{claim.immediateSolution}</p>
+                 <p className="text-[10px] text-slate-500 mt-2">Responsable: {claim.immediateSolutionResponsible}</p>
+                 {claim.immediateSolutionExecutionNotes && (
+                     <div className="ml-4 p-3 bg-green-50 border-l-4 border-green-500 text-xs mt-2">
+                        <strong>Ejecución:</strong> {claim.immediateSolutionExecutionNotes}
+                     </div>
+                 )}
+              </div>
           )}
        </div>
 
