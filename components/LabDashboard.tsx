@@ -9,7 +9,7 @@ import {
 import { Claim, ClaimStatus, InternalRole, IshikawaEntry, Task, EvidenceFile, MitigationAction } from '../types';
 import { enhanceIshikawaObservation, enhanceTaskInstruction, enhanceImmediateSolution } from '../services/geminiService';
 import { ClientReportTemplate, FinalReportTemplate } from './ReportTemplates';
-import { uploadPdfToDrive, closeClaimSimple, deleteTaskFromSheet, deleteMitigationFromSheet } from '../services/sheetsService';
+import { uploadPdfToDrive, closeClaimSimple } from '../services/sheetsService';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 
@@ -91,6 +91,9 @@ const getDaysBetween = (startStr: string, endStr?: string) => {
     return Math.floor(diffTime / (1000 * 60 * 60 * 24));
 };
 
+// Types for the Unified Confirmation Modal
+type ConfirmationType = 'DELETE_TASK' | 'DELETE_MITIGATION' | 'DELETE_CLAIM' | 'APPROVE_PLAN' | 'CLOSE_CASE_DEFINITIVE' | null;
+
 export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClaim, onDeleteClaim, onLogout, onRefresh }) => {
   const [currentRole, setCurrentRole] = useState<InternalRole | null>(null);
   const [selectedClaim, setSelectedClaim] = useState<Claim | null>(null);
@@ -116,8 +119,15 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
 
   const [isEnhancing, setIsEnhancing] = useState(false);
   const [isSavingPdf, setIsSavingPdf] = useState(false);
-  const [isClosingCase, setIsClosingCase] = useState(false);
-  const [isDeletingItem, setIsDeletingItem] = useState(false); // Global deleting state for feedback
+  const [isProcessingAction, setIsProcessingAction] = useState(false); // Generic processing state
+  
+  // UNIFIED CONFIRMATION MODAL STATE
+  const [confirmModal, setConfirmModal] = useState<{ 
+      isOpen: boolean, 
+      type: ConfirmationType, 
+      itemId: string | null 
+  }>({ isOpen: false, type: null, itemId: null });
+
   const printRef = useRef<HTMLDivElement>(null);
   const [reportMode, setReportMode] = useState<'CLIENT' | 'FINAL' | null>(null);
 
@@ -127,13 +137,13 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
   }, [currentRole]);
 
   useEffect(() => {
-    if (selectedClaim && !isClosingCase && !isDeletingItem) {
+    if (selectedClaim && !isProcessingAction) {
         const freshClaim = claims.find(c => c.id === selectedClaim.id);
         if (freshClaim && freshClaim !== selectedClaim) {
             setSelectedClaim(freshClaim);
         }
     }
-  }, [claims, selectedClaim, isClosingCase, isDeletingItem]);
+  }, [claims, selectedClaim, isProcessingAction]);
 
   useEffect(() => {
     if (currentRole && claims.length > 0 && !hasCheckedSLA) {
@@ -218,79 +228,88 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
       setReportMode('FINAL');
   };
 
-  // REFORMULATED VALIDATION: STRICT LINEAR DEPENDENCY
   const getActionPlanBlockingReason = () => {
       if (!selectedClaim) return null;
-      // 1. Check Mitigation FIRST
       if (!selectedClaim.mitigationActions || selectedClaim.mitigationActions.length === 0) return "No hay mitigaciones registradas";
       if (!selectedClaim.mitigationActions.every(m => m.status === 'Approved')) return "Mitigaciones pendientes por aprobar";
-      
-      // 2. Check Tasks
       if (!selectedClaim.tasks || selectedClaim.tasks.length === 0) return "No hay tareas creadas";
       if (!selectedClaim.tasks.every(t => t.status === 'Realized')) return "Tareas pendientes por ejecutar";
-      // 3. Check Ishikawa
       if (!selectedClaim.ishikawaList || selectedClaim.ishikawaList.length === 0) return "Falta registro en Ishikawa";
-      
       return null;
   };
 
-  const handleApproveActionPlan = () => {
-      if (!selectedClaim) return;
-      const reason = getActionPlanBlockingReason();
-      if (reason) {
-          alert(`NO SE PUEDE APROBAR EL PLAN:\n\nMotivo: ${reason}`);
-          return;
+  // --- UNIFIED MODAL HANDLERS ---
+  
+  const openConfirmModal = (type: ConfirmationType, itemId: string | null = null) => {
+      // Pre-checks for specific types
+      if (type === 'APPROVE_PLAN') {
+          const reason = getActionPlanBlockingReason();
+          if (reason) {
+              alert(`NO SE PUEDE APROBAR EL PLAN:\n\nMotivo: ${reason}`);
+              return;
+          }
       }
-
-      if (!window.confirm("¿Aprobar Plan de Acción y habilitar cierre definitivo?")) return;
-
-      const updated = {
-          ...selectedClaim,
-          actionPlanStatus: 'Approved' as const
-      };
-      onUpdateClaim(updated);
-      setSelectedClaim(updated);
+      setConfirmModal({ isOpen: true, type, itemId });
   };
 
-  // FINAL CLOSURE - NO VALIDATION, JUST EXECUTION
-  const handleFinalClose = async () => {
+  const handleConfirmAction = async () => {
       if (!selectedClaim) return;
       
-      if (selectedClaim.actionPlanStatus !== 'Approved') {
-           alert("Debe aprobar el Plan de Acción primero.");
-           return;
-      }
-
-      if (!window.confirm("ATENCIÓN: ¿Desea realizar el CIERRE ADMINISTRATIVO?\n\nEsto cambiará el estado a 'Cerrado' en la hoja de cálculo.")) return;
-      
-      setIsClosingCase(true);
-      
-      const today = new Date();
-      const day = today.getDate().toString().padStart(2, '0');
-      const month = (today.getMonth() + 1).toString().padStart(2, '0');
-      const year = today.getFullYear();
-      const formattedDate = `${day}/${month}/${year}`;
+      const { type, itemId } = confirmModal;
+      setIsProcessingAction(true);
 
       try {
-          const success = await closeClaimSimple(selectedClaim.id, formattedDate);
-          
-          if (success) {
-              alert("Orden de cierre enviada. Actualizando sistema...");
-              setTimeout(async () => {
+        if (type === 'DELETE_TASK') {
+            const updatedTasks = selectedClaim.tasks?.filter(t => t.id !== itemId) || [];
+            const updatedClaim = { ...selectedClaim, tasks: updatedTasks };
+            setSelectedClaim(updatedClaim);
+            await onUpdateClaim(updatedClaim);
+        } 
+        else if (type === 'DELETE_MITIGATION') {
+            const updatedActions = selectedClaim.mitigationActions?.filter(a => a.id !== itemId) || [];
+            const updatedClaim = { ...selectedClaim, mitigationActions: updatedActions };
+            setSelectedClaim(updatedClaim);
+            await onUpdateClaim(updatedClaim);
+        }
+        else if (type === 'DELETE_CLAIM') {
+            await onDeleteClaim(selectedClaim.id);
+            setSelectedClaim(null);
+        }
+        else if (type === 'APPROVE_PLAN') {
+            const updated = { ...selectedClaim, actionPlanStatus: 'Approved' as const };
+            await onUpdateClaim(updated);
+            setSelectedClaim(updated);
+        }
+        else if (type === 'CLOSE_CASE_DEFINITIVE') {
+             if (selectedClaim.actionPlanStatus !== 'Approved') {
+                alert("Debe aprobar el Plan de Acción primero.");
+                setIsProcessingAction(false);
+                setConfirmModal({ isOpen: false, type: null, itemId: null });
+                return;
+             }
+             const today = new Date();
+             const day = today.getDate().toString().padStart(2, '0');
+             const month = (today.getMonth() + 1).toString().padStart(2, '0');
+             const year = today.getFullYear();
+             const formattedDate = `${day}/${month}/${year}`;
+             const success = await closeClaimSimple(selectedClaim.id, formattedDate);
+             if (success) {
+                  // Optimistically update local state to avoid stale UI while refreshing
+                  setSelectedClaim({ ...selectedClaim, status: ClaimStatus.CLOSED, internalCloseDate: formattedDate });
                   await onRefresh();
-                  setSelectedClaim(null);
-                  setIsClosingCase(false);
-              }, 2000);
-          } else {
-              alert("Error de conexión al cerrar el caso.");
-              setIsClosingCase(false);
-          }
+             } else {
+                  alert("Error al cerrar el caso.");
+             }
+        }
       } catch (e) {
           console.error(e);
-          alert("Error crítico al cerrar.");
-          setIsClosingCase(false);
+          alert("Error ejecutando la acción.");
+      } finally {
+          setIsProcessingAction(false);
+          setConfirmModal({ isOpen: false, type: null, itemId: null });
       }
   };
+
 
   const handleViewEvidence = (file: { url?: string, base64?: string }) => {
      if (file.url) window.open(file.url, '_blank');
@@ -298,12 +317,6 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
         const win = window.open();
         win?.document.write('<iframe src="' + "data:application/pdf;base64," + file.base64 + '" frameborder="0" style="border:0; top:0px; left:0px; bottom:0px; right:0px; width:100%; height:100%;" allowfullscreen></iframe>');
      }
-  };
-
-  const handleDelete = async () => {
-      if (!selectedClaim || !window.confirm("¿CONFIRMA ELIMINAR ESTE CASO DEFINITIVAMENTE?\nEsta acción no se puede deshacer y ocultará el caso de todas las listas.")) return;
-      onDeleteClaim(selectedClaim.id); 
-      setSelectedClaim(null);
   };
 
   const handleOpenDrive = () => {
@@ -343,22 +356,6 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
     setTaskInput({ ...taskInput, description: '' });
   };
 
-  const handleDeleteTask = async (taskId: string) => {
-      if (!selectedClaim) return;
-      if (!window.confirm("¿Confirmar eliminación de esta tarea?")) return;
-
-      setIsDeletingItem(true);
-      try {
-        await deleteTaskFromSheet(taskId);
-        await onRefresh();
-      } catch (e) {
-        console.error(e);
-        alert("Error al eliminar la tarea.");
-      } finally {
-        setIsDeletingItem(false);
-      }
-  };
-
   // --- MITIGATION ACTIONS LOGIC ---
 
   const addMitigationAction = () => {
@@ -384,22 +381,6 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
       onUpdateClaim(updated);
       setSelectedClaim(updated);
       setImmediateInput(''); 
-  };
-
-  const handleDeleteMitigation = async (actionId: string) => {
-      if (!selectedClaim) return;
-      if (!window.confirm("¿Confirmar eliminación de esta acción de mitigación?")) return;
-
-      setIsDeletingItem(true);
-      try {
-        await deleteMitigationFromSheet(actionId);
-        await onRefresh();
-      } catch (e) {
-        console.error(e);
-        alert("Error al eliminar la mitigación.");
-      } finally {
-        setIsDeletingItem(false);
-      }
   };
 
   const handleExecuteMitigation = (actionId: string) => {
@@ -694,7 +675,7 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
   }
 
   return (
-    <div className={`h-screen bg-slate-50 flex flex-col font-sans relative ${isDeletingItem ? 'cursor-wait' : ''}`}>
+    <div className={`h-screen bg-slate-50 flex flex-col font-sans relative ${isProcessingAction ? 'cursor-wait' : ''}`}>
        {/* SLA Alert & Modals ... */}
        {showSLAAlert && (
           <div className="fixed inset-0 z-[200] bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm animate-fadeIn">
@@ -723,6 +704,52 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                   <button onClick={() => setShowSLAAlert(false)} className="w-full py-4 bg-slate-900 text-white rounded-xl font-bold hover:bg-black transition shadow-xl">Entendido</button>
               </div>
           </div>
+       )}
+
+       {/* UNIFIED CONFIRMATION MODAL */}
+       {confirmModal.isOpen && (
+           <div className="fixed inset-0 z-[300] bg-black/60 flex items-center justify-center p-4 backdrop-blur-sm animate-fadeIn">
+               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center border border-white/20">
+                   
+                   {/* DYNAMIC ICON */}
+                   {(confirmModal.type === 'DELETE_TASK' || confirmModal.type === 'DELETE_MITIGATION' || confirmModal.type === 'DELETE_CLAIM') ? (
+                       <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 text-red-600">
+                           <Trash2 size={32} />
+                       </div>
+                   ) : (
+                       <div className="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4 text-indigo-600">
+                           <CheckCircle2 size={32} />
+                       </div>
+                   )}
+
+                   {/* DYNAMIC TITLE */}
+                   <h3 className="text-xl font-bold text-slate-800 mb-2">
+                       {confirmModal.type === 'APPROVE_PLAN' ? '¿Aprobar Plan de Acción?' : 
+                        confirmModal.type === 'CLOSE_CASE_DEFINITIVE' ? '¿Cerrar Caso Definitivamente?' :
+                        '¿Eliminar Elemento?'}
+                   </h3>
+
+                   {/* DYNAMIC DESCRIPTION */}
+                   <p className="text-sm text-slate-500 mb-6">
+                       {confirmModal.type === 'APPROVE_PLAN' ? 'Esto habilitará el cierre administrativo del caso. Verifique que todo esté correcto.' :
+                        confirmModal.type === 'CLOSE_CASE_DEFINITIVE' ? 'El caso pasará a estado CERRADO y no se podrán hacer más ediciones.' :
+                        'Esta acción es irreversible.'}
+                   </p>
+
+                   <div className="flex gap-3">
+                       <button onClick={() => setConfirmModal({ isOpen: false, type: null, itemId: null })} className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 transition">Cancelar</button>
+                       <button 
+                           onClick={handleConfirmAction} 
+                           disabled={isProcessingAction}
+                           className={`flex-1 py-3 text-white rounded-xl font-bold shadow-lg transition flex items-center justify-center gap-2
+                               ${(confirmModal.type?.includes('DELETE')) ? 'bg-red-600 hover:bg-red-700 shadow-red-200' : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200'}
+                           `}
+                       >
+                           {isProcessingAction ? <Loader2 size={18} className="animate-spin"/> : (confirmModal.type?.includes('DELETE') ? "Eliminar" : "Confirmar")}
+                       </button>
+                   </div>
+               </div>
+           </div>
        )}
 
        {isEnhancing && <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm"><div className="bg-white p-8 rounded-2xl shadow-2xl"><h3 className="font-bold">Procesando IA...</h3></div></div>}
@@ -835,7 +862,7 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                            <div className="flex gap-2">
                                {isAdminRole && (
                                  <>
-                                    <button onClick={handleDelete} className="p-2 text-red-500 hover:bg-red-50 rounded" title="Eliminar Caso"><Trash2 size={20}/></button>
+                                    <button onClick={() => openConfirmModal('DELETE_CLAIM', selectedClaim.id)} className="p-2 text-red-500 hover:bg-red-50 rounded" title="Eliminar Caso"><Trash2 size={20}/></button>
                                     
                                     {/* BOTÓN 1: SOLO VER INFORME PDF */}
                                     <button onClick={handlePreviewFinalReport} disabled={selectedClaim.immediateSolutionStatus !== 'Approved'} className="px-4 py-2 bg-indigo-600 text-white rounded text-sm font-bold shadow-sm flex gap-2 hover:bg-indigo-700 disabled:opacity-50"><Printer size={16}/> Ver Informe Cierre</button>
@@ -843,11 +870,10 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                                     {/* MODIFIED BUTTON 2B: CIERRE DEFINITIVO (SOLO APARECE SI PLAN APROBADO) */}
                                     {currentRole === InternalRole.AUDIT && selectedClaim.status !== ClaimStatus.CLOSED && selectedClaim.actionPlanStatus === 'Approved' && (
                                         <button 
-                                            onClick={handleFinalClose} 
-                                            disabled={isClosingCase}
+                                            onClick={() => openConfirmModal('CLOSE_CASE_DEFINITIVE')} 
                                             className="px-4 py-2 bg-slate-800 text-white rounded text-sm font-bold shadow-sm flex gap-2 hover:bg-black hover:shadow-md hover:-translate-y-0.5 transition-all"
                                         >
-                                            {isClosingCase ? <Loader2 className="animate-spin" size={16}/> : <Lock size={16}/>}
+                                            <Lock size={16}/>
                                             Cierre Definitivo
                                         </button>
                                     )}
@@ -962,23 +988,23 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                           {selectedClaim.mitigationActions && selectedClaim.mitigationActions.length > 0 ? (
                               selectedClaim.mitigationActions.map((action) => (
                                   <div key={action.id} className={`group relative bg-white p-4 rounded-xl border shadow-sm ${action.status === 'Approved' ? 'border-green-200 bg-green-50/20' : 'border-amber-100'}`}>
-                                      {isAdminRole && (
-                                          <button 
-                                            onClick={(e) => { e.stopPropagation(); handleDeleteMitigation(action.id); }} 
-                                            className="absolute top-2 right-2 p-1.5 bg-white/80 text-red-400 rounded-full opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-50 hover:text-red-600 shadow-sm z-10 pointer-events-auto"
-                                            title="Eliminar Mitigación"
-                                          >
-                                              <Trash2 size={14} />
-                                          </button>
-                                      )}
                                       <div className="flex justify-between items-start mb-2">
                                           <div className="flex-1 pr-6">
                                               <div className="font-medium text-amber-900 text-sm mb-1 whitespace-pre-wrap">{action.description}</div>
-                                              <div className="flex gap-2">
+                                              <div className="flex gap-2 items-center">
                                                   <span className="text-amber-700 font-bold text-xs bg-amber-50 px-2 py-0.5 rounded">Resp: {action.assignedTo}</span>
                                                   <span className={`text-xs font-bold px-2 py-0.5 rounded ${action.status === 'Approved' ? 'bg-green-200 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
                                                       {action.status === 'Approved' ? 'APROBADO' : 'PENDIENTE'}
                                                   </span>
+                                                  {isAdminRole && (
+                                                      <button 
+                                                        onClick={(e) => { e.stopPropagation(); openConfirmModal('DELETE_MITIGATION', action.id); }} 
+                                                        className="ml-2 p-1.5 text-red-300 hover:text-red-600 hover:bg-red-50 rounded-full transition"
+                                                        title="Eliminar Mitigación"
+                                                      >
+                                                          <Trash2 size={14} />
+                                                      </button>
+                                                  )}
                                               </div>
                                           </div>
                                       </div>
@@ -1086,24 +1112,25 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                       <div className="space-y-4">
                          {visibleTasks.length > 0 ? visibleTasks.map((t) => (
                              <div key={t.id} className={`group relative flex flex-col p-4 rounded-xl border transition-all ${t.status === 'Realized' ? 'bg-green-50 border-green-200' : 'bg-white border-slate-200 shadow-sm hover:shadow-md'}`}>
-                                 {isAdminRole && (
-                                      <button 
-                                        onClick={(e) => { e.stopPropagation(); handleDeleteTask(t.id); }} 
-                                        className="absolute top-2 right-2 p-1.5 bg-white/80 text-red-400 rounded-full opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-50 hover:text-red-600 shadow-sm z-10 pointer-events-auto"
-                                        title="Eliminar Tarea"
-                                      >
-                                          <Trash2 size={14} />
-                                      </button>
-                                 )}
                                  <div className="flex justify-between items-start mb-2">
                                      <div className="flex items-center gap-2">
                                          <span className="text-xs font-bold uppercase bg-slate-200 text-slate-600 px-2 py-0.5 rounded">{t.assignedTo}</span>
                                          <p className="font-medium text-slate-800 pr-6">{t.description}</p>
                                      </div>
                                      <div className="flex items-center gap-2">
-                                         <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${t.status === 'Realized' ? 'bg-green-200 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
-                                             {t.status === 'Realized' ? 'EJECUTADO' : 'PENDIENTE'}
+                                         {/* VISUAL CHANGE: IF PLAN IS APPROVED, SHOW 'APROBADO' IN BLUE INSTEAD OF 'EJECUTADO' IN GREEN */}
+                                         <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${t.status === 'Realized' ? (selectedClaim.actionPlanStatus === 'Approved' ? 'bg-blue-100 text-blue-800 border border-blue-200' : 'bg-green-200 text-green-800') : 'bg-yellow-100 text-yellow-800'}`}>
+                                             {t.status === 'Realized' ? (selectedClaim.actionPlanStatus === 'Approved' ? 'APROBADO' : 'EJECUTADO') : 'PENDIENTE'}
                                          </span>
+                                         {isAdminRole && (
+                                              <button 
+                                                onClick={(e) => { e.stopPropagation(); openConfirmModal('DELETE_TASK', t.id); }} 
+                                                className="ml-2 p-1.5 text-red-300 hover:text-red-600 hover:bg-red-50 rounded-full transition"
+                                                title="Eliminar Tarea"
+                                              >
+                                                  <Trash2 size={14} />
+                                              </button>
+                                         )}
                                      </div>
                                  </div>
                                  {t.status === 'Pending' && canExecute(t.assignedTo) && executingTaskId !== t.id && (
@@ -1139,9 +1166,9 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                       
                       {/* BUTTON MOVED HERE: APPROVE ACTION PLAN */}
                       {currentRole === InternalRole.AUDIT && selectedClaim.status !== ClaimStatus.CLOSED && selectedClaim.actionPlanStatus !== 'Approved' && canApproveActionPlan && (
-                          <div className="mt-6 flex justify-end border-t border-slate-100 pt-4">
+                          <div className="mt-6 flex justify-end border-t border-slate-100 pt-4 relative z-10">
                                <button 
-                                   onClick={handleApproveActionPlan}
+                                   onClick={() => openConfirmModal('APPROVE_PLAN')}
                                    className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold shadow-lg shadow-blue-200 hover:bg-blue-700 transition flex items-center gap-2"
                                >
                                    <ThumbsUp size={18}/> Aprobar Plan de Acción

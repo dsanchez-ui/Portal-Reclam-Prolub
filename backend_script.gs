@@ -11,8 +11,9 @@ const ISHIKAWA_SHEET = 'Ishikawa';
 
 function setupSheets() {
   const doc = SpreadsheetApp.getActiveSpreadsheet();
+  // Added 'Estado_Plan_Accion' at the end
   const sheets = {
-    [CLAIMS_SHEET]: ['ID_Reclamacion', 'Fecha_Reporte', 'Estado', 'Cliente', 'Nombre_Reporta', 'Email_Reporta', 'Numero_Factura', 'Marca', 'Productos_Afectados_RAW', 'Lotes_RAW', 'Tipo_Incidente', 'Descripcion', 'Tipo_Correccion', 'URL_Carpeta_Drive', 'Fecha_Cierre_Interno', 'Items_Afectados_JSON', 'Archivos_JSON'],
+    [CLAIMS_SHEET]: ['ID_Reclamacion', 'Fecha_Reporte', 'Estado', 'Cliente', 'Nombre_Reporta', 'Email_Reporta', 'Numero_Factura', 'Marca', 'Productos_Afectados_RAW', 'Lotes_RAW', 'Tipo_Incidente', 'Descripcion', 'Tipo_Correccion', 'URL_Carpeta_Drive', 'Fecha_Cierre_Interno', 'Items_Afectados_JSON', 'Archivos_JSON', 'Estado_Plan_Accion'],
     [TASKS_SHEET]: ['ID_Tarea', 'ID_Reclamacion', 'Descripcion', 'Asignado_A', 'Estado', 'Notas_Ejecucion', 'Evidencia_JSON', 'Fecha_Creacion', 'Fecha_Completado'],
     [MITIGATIONS_SHEET]: ['ID_Mitigacion', 'ID_Reclamacion', 'Descripcion', 'Asignado_A', 'Estado', 'Notas_Ejecucion', 'Evidencia_JSON', 'Fecha_Creacion', 'Fecha_Completado', 'Fecha_Aprobado'],
     [ISHIKAWA_SHEET]: ['ID_Ishikawa', 'ID_Reclamacion', 'Categoria', 'Observacion', 'Fecha_Creacion']
@@ -23,6 +24,14 @@ function setupSheets() {
       const sheet = doc.insertSheet(name);
       sheet.appendRow(sheets[name]);
       sheet.setFrozenRows(1);
+    } else {
+       // Auto-migration: Check if new column exists, if not, add header
+       const sheet = doc.getSheetByName(name);
+       const lastCol = sheet.getLastColumn();
+       const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+       if (name === CLAIMS_SHEET && headers.length < 18) {
+           sheet.getRange(1, 18).setValue('Estado_Plan_Accion');
+       }
     }
   });
 }
@@ -137,6 +146,7 @@ function doGet(e) {
         
         affectedItems: parseJSONSafe(row[15]),
         files: parseJSONSafe(row[16]),
+        actionPlanStatus: row[17] || 'Pending', // New Field at Index 17
 
         tasks: tasksMap[id] || [],
         mitigationActions: allMitigations,
@@ -144,7 +154,6 @@ function doGet(e) {
         
         // Derived/Legacy fields for frontend compatibility
         immediateSolutionStatus: allApproved ? 'Approved' : 'Pending',
-        actionPlanStatus: "Pending" // This needs a proper storage if required, for now default
       };
     });
 
@@ -210,11 +219,12 @@ function createClaim(doc, claimData, rawFiles) {
   // Handle file uploads and get Drive folder URL
   const { driveFolderUrl, uploadedFileInfos } = handleFileUploads(claimData.id, claimData.client, rawFiles);
 
-  // Main Claim Row
+  // Main Claim Row (Added actionPlanStatus at end)
   claimsSheet.appendRow([
     claimData.id, claimData.date, claimData.status, claimData.client, claimData.reporterName, claimData.reporterEmail, 
     claimData.invoiceNumber, claimData.brand, claimData.productRef, claimData.batch, claimData.incidentType, 
-    claimData.description, claimData.correctionType, driveFolderUrl, '', JSON.stringify(claimData.affectedItems || []), JSON.stringify(uploadedFileInfos)
+    claimData.description, claimData.correctionType, driveFolderUrl, '', JSON.stringify(claimData.affectedItems || []), 
+    JSON.stringify(uploadedFileInfos), claimData.actionPlanStatus || 'Pending'
   ]);
   
   // Child Rows
@@ -243,11 +253,12 @@ function updateClaim(doc, claimData, rawFiles) {
   const existingFiles = parseJSONSafe(claimsSheet.getRange(rowIndex, 17).getValue());
   const allFiles = [...existingFiles, ...uploadedFileInfos];
 
-  // Update Main Claim Row
-  claimsSheet.getRange(rowIndex, 1, 1, 17).setValues([[
+  // Update Main Claim Row - Now writing 18 columns to include actionPlanStatus
+  claimsSheet.getRange(rowIndex, 1, 1, 18).setValues([[
     claimId, claimData.date, claimData.status, claimData.client, claimData.reporterName, claimData.reporterEmail, 
     claimData.invoiceNumber, claimData.brand, claimData.productRef, claimData.batch, claimData.incidentType, 
-    claimData.description, claimData.correctionType, existingFolderUrl, claimData.internalCloseDate || '', JSON.stringify(claimData.affectedItems || []), JSON.stringify(allFiles)
+    claimData.description, claimData.correctionType, existingFolderUrl, claimData.internalCloseDate || '', 
+    JSON.stringify(claimData.affectedItems || []), JSON.stringify(allFiles), claimData.actionPlanStatus || 'Pending'
   ]]);
 
   // Delete and re-add child records to ensure sync

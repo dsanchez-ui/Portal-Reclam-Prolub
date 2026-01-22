@@ -25,7 +25,9 @@ import {
   Zap,
   LayoutGrid,
   TrendingUp,
-  Activity
+  Activity,
+  Database,
+  CloudLightning
 } from 'lucide-react';
 
 // Enhanced Improvement Wizard Component with File Upload
@@ -321,9 +323,44 @@ export default function App() {
          <div className="absolute inset-0 opacity-[0.2] bg-[url('https://grainy-gradients.vercel.app/noise.svg')]"></div>
       </div>
       <style>{`@keyframes float { 0% { transform: translate(0px, 0px) scale(1); } 33% { transform: translate(10px, -20px) scale(1.05); } 66% { transform: translate(-10px, 10px) scale(0.95); } 100% { transform: translate(0px, 0px) scale(1); } } .animate-float-slow { animation: float 25s ease-in-out infinite; } .animate-float-medium { animation: float 20s ease-in-out infinite reverse; }`}</style>
+      
+      {/* NOTIFICATIONS */}
       {notification && notification.visible && (<div className="fixed top-6 left-1/2 transform -translate-x-1/2 z-[200] animate-bounce-in px-4 w-full max-w-md"><div className="bg-green-600 text-white px-6 py-5 rounded-2xl shadow-2xl flex items-center gap-4 border border-green-500/50 backdrop-blur-sm"><div className="bg-white/20 p-3 rounded-full flex-shrink-0"><CheckCircle2 size={32} className="text-white" strokeWidth={3} /></div><div className="flex-1"><h4 className="font-bold text-xl leading-none mb-1">{notification.message}</h4>{notification.subMessage && (<p className="text-green-100 text-sm leading-tight opacity-90">{notification.subMessage}</p>)}</div></div></div>)}
+      
+      {/* INTERNAL AUTH MODAL */}
       {showInternalAuth && (<div className="fixed inset-0 bg-black/60 backdrop-blur-md z-[100] flex items-center justify-center p-4"><div className="bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl p-8 max-w-sm w-full text-center relative animate-fadeIn border border-white/50"><button onClick={() => setShowInternalAuth(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 hover:bg-slate-100 p-1 rounded-full transition"><X size={20} /></button><div className="w-16 h-16 bg-gradient-to-tr from-indigo-600 to-purple-600 rounded-2xl flex items-center justify-center mx-auto mb-6 text-white shadow-lg"><Lock size={32} /></div><h3 className="text-xl font-bold text-slate-800 mb-2">Acceso Corporativo</h3><p className="text-sm text-slate-500 mb-6">Área restringida. Ingrese credenciales.</p><input type="password" autoFocus placeholder="PIN" className="w-full text-center text-3xl font-mono tracking-[0.5em] p-4 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-600 focus:border-transparent mb-3 transition-all bg-white" value={internalPin} onChange={(e) => { setInternalPin(e.target.value); setInternalPinError(false); }} onKeyDown={(e) => e.key === 'Enter' && handleInternalAuthSubmit()} />{internalPinError && <p className="text-xs text-red-500 font-bold mb-4 bg-red-50 py-1 px-3 rounded-full inline-block">Código incorrecto</p>}<button onClick={handleInternalAuthSubmit} className="w-full mt-2 py-4 rounded-xl bg-gradient-to-r from-indigo-700 to-purple-800 text-white font-bold text-sm hover:shadow-lg hover:-translate-y-0.5 transition-all">VALIDAR ACCESO</button></div></div>)}
-      {isLoading && (<div className="fixed top-6 right-6 z-50 bg-white/50 backdrop-blur-md rounded-full px-4 py-2 flex items-center gap-2 shadow-sm border border-white/20 animate-pulse"><RefreshCw size={16} className="animate-spin text-indigo-600" /><span className="text-xs font-bold text-slate-600">Sincronizando...</span></div>)}
+      
+      {/* FULL SCREEN LOADING OVERLAY */}
+      {isLoading && (
+        <div className="fixed inset-0 z-[500] bg-slate-900/60 backdrop-blur-md flex flex-col items-center justify-center p-4 animate-fadeIn cursor-wait transition-all">
+          <div className="bg-white rounded-3xl shadow-2xl p-8 max-w-sm w-full text-center relative overflow-hidden border border-white/20">
+            {/* Decorative Top Bar */}
+            <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-indigo-500 via-purple-500 to-indigo-500 animate-pulse"></div>
+            
+            <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-inner ring-4 ring-indigo-50/50">
+              <RefreshCw size={32} className="text-indigo-600 animate-spin" />
+            </div>
+            
+            <h3 className="text-xl font-black text-slate-800 mb-2">Sincronizando</h3>
+            
+            <div className="space-y-4">
+              <p className="text-slate-500 text-sm font-medium leading-relaxed">
+                Conectando con la base de datos en Google Sheets...
+              </p>
+              
+              <div className="flex items-center justify-center gap-2 text-xs text-slate-400 bg-slate-50 py-2 px-3 rounded-lg border border-slate-100">
+                 <Database size={12} className="text-slate-400"/>
+                 <span>No cierres esta ventana</span>
+              </div>
+              
+              <p className="text-[10px] text-indigo-400 font-bold animate-pulse">
+                Esto puede tomar unos segundos...
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="relative z-10 flex flex-col min-h-screen">{renderView()}</div>
     </div>
   );
