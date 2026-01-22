@@ -28,27 +28,6 @@ import {
   Activity
 } from 'lucide-react';
 
-// Fallback Mock Data (Only used if Sheet is empty or fails)
-const FALLBACK_CLAIMS: Claim[] = [
-  {
-    id: 'CLM-MOCK-001',
-    date: '2024-10-25',
-    reporterName: 'Juan Patarroyo', 
-    client: 'Maquinagros',
-    invoiceNumber: 'FE-1120',
-    incidentType: IncidentType.QUALITY,
-    brand: Brand.GULF,
-    productRef: 'Super Duty 15W-40',
-    batch: 'L-2025-A1',
-    correctionType: 'Pendiente revisión',
-    description: 'El cliente reporta sedimentos extraños en el fondo del balde al realizar el cambio de aceite.',
-    status: ClaimStatus.PENDING,
-    ishikawaList: [],
-    tasks: [],
-    files: []
-  }
-];
-
 // Enhanced Improvement Wizard Component with File Upload
 const ImprovementWizard = ({ onBack, onSubmit }: { onBack: () => void, onSubmit: (data: any, files: File[]) => void }) => {
   const [desc, setDesc] = useState('');
@@ -165,33 +144,25 @@ export default function App() {
   const [claims, setClaims] = useState<Claim[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   
-  // Track the active commercial user to auto-fill the wizard and persist session
   const [activeCommercialUser, setActiveCommercialUser] = useState<string>('');
-
-  // Notification State
   const [notification, setNotification] = useState<{message: string, subMessage?: string, visible: boolean} | null>(null);
-
-  // Internal Management Auth State
   const [showInternalAuth, setShowInternalAuth] = useState(false);
   const [internalPin, setInternalPin] = useState('');
   const [internalPinError, setInternalPinError] = useState(false);
-
-  // Background Interactive State
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
 
-  // --- LOAD DATA ON STARTUP ---
   useEffect(() => {
     loadClaims();
   }, []);
 
   const loadClaims = async () => {
     setIsLoading(true);
-    const data = await getClaimsFromSheet();
-    if (data && data.length > 0) {
-      setClaims(data);
-    } else {
-      console.log("No data found in sheet or error, using fallback for demo.");
-      setClaims(FALLBACK_CLAIMS); 
+    try {
+      const data = await getClaimsFromSheet();
+      setClaims(data || []);
+    } catch (error) {
+      console.error("Failed to load claims, showing empty state.", error);
+      setClaims([]);
     }
     setIsLoading(false);
   };
@@ -201,34 +172,28 @@ export default function App() {
     setTimeout(() => setNotification(null), 5000);
   };
 
-  // UPDATED HANDLER: Now accepts rawFiles
-  const handleCommercialSubmit = (newClaimData: any, rawFiles: File[]) => {
+  const handleCommercialSubmit = async (newClaimData: any, rawFiles: File[]) => {
+    setIsLoading(true);
     const newClaim: Claim = {
       id: `CLM-${new Date().getFullYear()}-${Math.floor(Math.random() * 10000)}`,
       date: new Date().toLocaleDateString('es-ES', { year: 'numeric', month: '2-digit', day: '2-digit' }),
       status: ClaimStatus.PENDING,
-      ishikawaList: [],
-      tasks: [],
-      files: newClaimData.files || [], 
       ...newClaimData
     };
 
-    setClaims(prev => [newClaim, ...prev]);
-    
-    // Save to Google Sheet with raw files for Drive upload
-    saveClaimToSheet(newClaim, rawFiles);
+    await saveClaimToSheet(newClaim, rawFiles);
+    await loadClaims(); // RE-FETCH from the single source of truth
 
-    // Do NOT reset activeCommercialUser here to keep the session
     setCurrentView(AppView.COMMERCIAL_DASHBOARD);
-    
-    // Show Green Success Toast
+    setIsLoading(false);
     showSuccessNotification(
         "¡Reclamación Exitosa!",
-        "Gracias, su caso ha sido enviado al laboratorio correctamente."
+        "Su caso ha sido enviado al laboratorio correctamente."
     );
   };
 
-  const handleImprovementSubmit = (data: any, files: File[]) => {
+  const handleImprovementSubmit = async (data: any, files: File[]) => {
+    setIsLoading(true);
     const id = `IMP-${new Date().getFullYear()}-${Math.floor(Math.random() * 10000)}`;
     
     const improvementClaim: any = {
@@ -237,35 +202,33 @@ export default function App() {
       status: ClaimStatus.PENDING,
       client: `MEJORA - ${data.area}`, 
       reporterName: 'Mejora Continua',
-      reporterEmail: '', 
       incidentType: IncidentType.QUALITY,
       brand: Brand.MAQUILA, 
-      productRef: 'N/A',
-      batch: 'N/A',
       description: data.description,
-      correctionType: 'N/A',
-      files: [], 
-      ishikawaList: [],
-      tasks: []
     };
 
-    saveClaimToSheet(improvementClaim, files);
-    showSuccessNotification("¡Reporte Enviado!", "Tu oportunidad de mejora ha sido registrada y los archivos cargados.");
+    await saveClaimToSheet(improvementClaim, files);
+    await loadClaims(); // RE-FETCH
+    
+    setIsLoading(false);
+    showSuccessNotification("¡Reporte Enviado!", "Tu oportunidad de mejora ha sido registrada.");
     setCurrentView(AppView.LANDING);
   };
 
-  const handleLabUpdate = (updatedClaim: Claim, newFiles: File[] = []) => {
-    setClaims(prev => prev.map(c => c.id === updatedClaim.id ? updatedClaim : c));
-    updateClaimInSheet(updatedClaim, newFiles);
+  const handleLabUpdate = async (updatedClaim: Claim, newFiles: File[] = []) => {
+    setIsLoading(true);
+    await updateClaimInSheet(updatedClaim, newFiles);
+    await loadClaims(); // RE-FETCH from the single source of truth
+    setIsLoading(false);
   };
 
-  // NEW: Handle Delete to remove from local state immediately
-  const handleDeleteClaim = (claimId: string) => {
-      setClaims(prev => prev.filter(c => c.id !== claimId));
-      deleteClaimFromSheet(claimId); // Calls backend 'delete' (soft delete)
+  const handleDeleteClaim = async (claimId: string) => {
+      setIsLoading(true);
+      await deleteClaimFromSheet(claimId);
+      await loadClaims(); // RE-FETCH from the single source of truth
+      setIsLoading(false);
   };
 
-  // Handler for creating new claim from dashboard
   const handleCreateNewClaim = (reporterName: string) => {
     setActiveCommercialUser(reporterName);
     setCurrentView(AppView.COMMERCIAL_WIZARD);
@@ -276,7 +239,6 @@ export default function App() {
     setCurrentView(AppView.LANDING);
   };
 
-  // Internal Auth Logic
   const handleInternalAuthSubmit = () => {
     if (internalPin === '2026') {
       setShowInternalAuth(false);
@@ -294,23 +256,17 @@ export default function App() {
     setInternalPinError(false);
   };
 
-  // Interactive Background Logic
   const handleMouseMove = (e: React.MouseEvent) => {
-    // Global movement tracking
     const x = (e.clientX / window.innerWidth - 0.5) * 20;
     const y = (e.clientY / window.innerHeight - 0.5) * 20;
     setMousePos({ x, y });
   };
 
-  // Render content based on view
   const renderView = () => {
-    // Landing View
     if (currentView === AppView.LANDING) {
       return (
         <div className="flex flex-col justify-center items-center relative z-10 px-6 max-w-7xl mx-auto w-full pt-10 pb-20">
-            {/* HERO SECTION */}
             <div className="text-center mb-16 max-w-4xl mx-auto animate-fadeIn flex flex-col items-center">
-               {/* PROLUB LOGO */}
                <div className="mb-10 transform hover:scale-105 transition duration-500">
                  <img 
                    src="https://i.ibb.co/0RTvYnq6/Logo-Prolub-principal-3.png" 
@@ -318,231 +274,57 @@ export default function App() {
                    className="h-24 md:h-32 object-contain drop-shadow-xl" 
                  />
                </div>
-
-               <h1 className="text-4xl md:text-6xl font-black text-slate-900 tracking-tight mb-2 leading-tight drop-shadow-sm">
-                 Portal
-               </h1>
-               <h1 className="text-4xl md:text-6xl font-black text-transparent bg-clip-text bg-gradient-to-r from-indigo-700 to-purple-700 tracking-tight leading-tight drop-shadow-sm pb-2">
-                 Oportunidades de Mejora
-               </h1>
-               
+               <h1 className="text-4xl md:text-6xl font-black text-slate-900 tracking-tight mb-2 leading-tight drop-shadow-sm">Portal</h1>
+               <h1 className="text-4xl md:text-6xl font-black text-transparent bg-clip-text bg-gradient-to-r from-indigo-700 to-purple-700 tracking-tight leading-tight drop-shadow-sm pb-2">Oportunidades de Mejora</h1>
                <div className="w-16 h-1.5 bg-gradient-to-r from-indigo-600 to-purple-600 rounded-full mt-8 mb-8 mx-auto opacity-80"></div>
-               
-               <p className="text-lg text-slate-600 font-medium leading-relaxed max-w-2xl mx-auto tracking-wide">
-                 Gestión centralizada de calidad, logística y excelencia operativa.
-               </p>
+               <p className="text-lg text-slate-600 font-medium leading-relaxed max-w-2xl mx-auto tracking-wide">Gestión centralizada de calidad, logística y excelencia operativa.</p>
             </div>
-
-            {/* CARDS GRID */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full max-w-5xl">
-              
-              {/* Commercial Card */}
-              <div 
-                onClick={() => setCurrentView(AppView.COMMERCIAL_DASHBOARD)}
-                className="group relative bg-white/70 backdrop-blur-xl rounded-[2rem] p-10 border border-white/80 shadow-lg hover:shadow-2xl hover:bg-white/90 transition-all duration-500 hover:-translate-y-1 cursor-pointer overflow-hidden ring-1 ring-white/60"
-              >
+              <div onClick={() => setCurrentView(AppView.COMMERCIAL_DASHBOARD)} className="group relative bg-white/70 backdrop-blur-xl rounded-[2rem] p-10 border border-white/80 shadow-lg hover:shadow-2xl hover:bg-white/90 transition-all duration-500 hover:-translate-y-1 cursor-pointer overflow-hidden ring-1 ring-white/60">
                 <div className="absolute inset-0 bg-gradient-to-br from-indigo-50/30 to-purple-50/30 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
                 <div className="relative z-10 flex flex-col h-full items-center text-center">
-                    <div className="w-16 h-16 bg-gradient-to-br from-indigo-600 to-purple-600 rounded-2xl flex items-center justify-center text-white mb-6 shadow-lg group-hover:scale-110 transition-transform duration-500">
-                      <TrendingUp size={32} />
-                    </div>
-                    
+                    <div className="w-16 h-16 bg-gradient-to-br from-indigo-600 to-purple-600 rounded-2xl flex items-center justify-center text-white mb-6 shadow-lg group-hover:scale-110 transition-transform duration-500"><TrendingUp size={32} /></div>
                     <h2 className="text-2xl font-bold text-slate-800 mb-3 tracking-tight">Gestión Comercial</h2>
-                    <p className="text-slate-500 text-sm leading-relaxed mb-8 font-medium">
-                      Reporte de novedades en campo, seguimiento de clientes y gestión de PQR.
-                    </p>
-                    
-                    <div className="mt-auto flex items-center text-indigo-700 font-bold text-sm bg-indigo-50 border border-indigo-100 px-8 py-3 rounded-full group-hover:bg-indigo-600 group-hover:text-white transition-all duration-300 shadow-sm">
-                      Ingresar <ArrowRight size={16} className="ml-2 group-hover:translate-x-1 transition-transform" />
-                    </div>
+                    <p className="text-slate-500 text-sm leading-relaxed mb-8 font-medium">Reporte de novedades en campo, seguimiento de clientes y gestión de PQR.</p>
+                    <div className="mt-auto flex items-center text-indigo-700 font-bold text-sm bg-indigo-50 border border-indigo-100 px-8 py-3 rounded-full group-hover:bg-indigo-600 group-hover:text-white transition-all duration-300 shadow-sm">Ingresar <ArrowRight size={16} className="ml-2 group-hover:translate-x-1 transition-transform" /></div>
                 </div>
               </div>
-
-              {/* Internal Mgmt Card */}
-              <div 
-                onClick={openInternalAuth}
-                className="group relative bg-white/70 backdrop-blur-xl rounded-[2rem] p-10 border border-white/80 shadow-lg hover:shadow-2xl hover:bg-white/90 transition-all duration-500 hover:-translate-y-1 cursor-pointer overflow-hidden ring-1 ring-white/60"
-              >
+              <div onClick={openInternalAuth} className="group relative bg-white/70 backdrop-blur-xl rounded-[2rem] p-10 border border-white/80 shadow-lg hover:shadow-2xl hover:bg-white/90 transition-all duration-500 hover:-translate-y-1 cursor-pointer overflow-hidden ring-1 ring-white/60">
                 <div className="absolute inset-0 bg-gradient-to-br from-indigo-50/30 to-blue-50/30 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
                 <div className="relative z-10 flex flex-col h-full items-center text-center">
-                    <div className="w-16 h-16 bg-white border-2 border-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600 mb-6 shadow-lg group-hover:scale-110 transition-transform duration-500">
-                      <Activity size={32} />
-                    </div>
-                    
+                    <div className="w-16 h-16 bg-white border-2 border-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600 mb-6 shadow-lg group-hover:scale-110 transition-transform duration-500"><Activity size={32} /></div>
                     <h2 className="text-2xl font-bold text-slate-800 mb-3 tracking-tight">Gestión Interna</h2>
-                    <p className="text-slate-500 text-sm leading-relaxed mb-8 font-medium">
-                      Laboratorio, Planta, Logística y HSEQ. Análisis de causa raíz y asignación de tareas.
-                    </p>
-                    
-                    <div className="mt-auto flex items-center text-slate-600 font-bold text-sm bg-white border border-slate-200 px-8 py-3 rounded-full group-hover:bg-slate-800 group-hover:text-white group-hover:border-slate-800 transition-all duration-300 shadow-sm">
-                      Acceder <ArrowRight size={16} className="ml-2 group-hover:translate-x-1 transition-transform" />
-                    </div>
+                    <p className="text-slate-500 text-sm leading-relaxed mb-8 font-medium">Laboratorio, Planta, Logística y HSEQ. Análisis de causa raíz y asignación de tareas.</p>
+                    <div className="mt-auto flex items-center text-slate-600 font-bold text-sm bg-white border border-slate-200 px-8 py-3 rounded-full group-hover:bg-slate-800 group-hover:text-white group-hover:border-slate-800 transition-all duration-300 shadow-sm">Acceder <ArrowRight size={16} className="ml-2 group-hover:translate-x-1 transition-transform" /></div>
                 </div>
               </div>
-
             </div>
-            
-            {/* Footer */}
             <div className="mt-20 py-6 text-center relative z-10 border-t border-slate-200/50 w-full max-w-4xl">
-               <p className="text-slate-400 text-[10px] font-bold tracking-widest uppercase">
-                 © 2026 Doge Ai - Prolub S.A. - Todos los derechos reservados
-               </p>
+               <p className="text-slate-400 text-[10px] font-bold tracking-widest uppercase">© 2026 Doge Ai - Prolub S.A. - Todos los derechos reservados</p>
             </div>
         </div>
       );
     }
 
-    // Commercial Dashboard View
-    if (currentView === AppView.COMMERCIAL_DASHBOARD) {
-      return (
-        <CommercialDashboard 
-          claims={claims}
-          onCreateNew={handleCreateNewClaim}
-          onLogout={handleCommercialLogout}
-          activeUser={activeCommercialUser}
-          onUserChange={setActiveCommercialUser}
-        />
-      );
-    }
-
-    // Commercial Wizard View
-    if (currentView === AppView.COMMERCIAL_WIZARD) {
-      return (
-        <CommercialWizard 
-          onSubmit={handleCommercialSubmit} 
-          onCancel={() => setCurrentView(AppView.COMMERCIAL_DASHBOARD)}
-          defaultReporterName={activeCommercialUser}
-        />
-      );
-    }
-
-    // Lab View (Internal Management)
-    if (currentView === AppView.LAB_DASHBOARD) {
-      return (
-        <LabDashboard 
-          claims={claims} 
-          onUpdateClaim={handleLabUpdate} 
-          onDeleteClaim={handleDeleteClaim} 
-          onLogout={() => setCurrentView(AppView.LANDING)}
-          onRefresh={loadClaims} // NEW PROP
-        />
-      );
-    }
-
-    // Improvement Wizard View
-    if (currentView === AppView.IMPROVEMENT) {
-      return (
-        <ImprovementWizard 
-          onBack={() => setCurrentView(AppView.LANDING)} 
-          onSubmit={handleImprovementSubmit} 
-        />
-      );
-    }
-
+    if (currentView === AppView.COMMERCIAL_DASHBOARD) return <CommercialDashboard claims={claims} onCreateNew={handleCreateNewClaim} onLogout={handleCommercialLogout} activeUser={activeCommercialUser} onUserChange={setActiveCommercialUser} />;
+    if (currentView === AppView.COMMERCIAL_WIZARD) return <CommercialWizard onSubmit={handleCommercialSubmit} onCancel={() => setCurrentView(AppView.COMMERCIAL_DASHBOARD)} defaultReporterName={activeCommercialUser} />;
+    if (currentView === AppView.LAB_DASHBOARD) return <LabDashboard claims={claims} onUpdateClaim={handleLabUpdate} onDeleteClaim={handleDeleteClaim} onLogout={() => setCurrentView(AppView.LANDING)} onRefresh={loadClaims} />;
+    if (currentView === AppView.IMPROVEMENT) return <ImprovementWizard onBack={() => setCurrentView(AppView.LANDING)} onSubmit={handleImprovementSubmit} />;
     return <div>Error: Vista desconocida</div>;
   };
 
   return (
-    <div 
-        className="min-h-screen bg-slate-50 font-sans text-slate-800 relative overflow-hidden"
-        onMouseMove={handleMouseMove}
-    >
-      {/* GLOBAL ANIMATED BACKGROUND - VISIBLE IN ALL VIEWS */}
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-800 relative overflow-hidden" onMouseMove={handleMouseMove}>
       <div className="fixed inset-0 z-0 pointer-events-none">
-         {/* Large Soft Glow - Indigo/Purple Blend (Sober) */}
-         <div 
-            className="absolute -top-[10%] left-[10%] w-[80vw] h-[80vw] bg-indigo-100/40 rounded-full mix-blend-multiply filter blur-[120px] opacity-60 animate-float-slow"
-            style={{ transform: `translate(${mousePos.x * 0.5}px, ${mousePos.y * 0.5}px)` }}
-         ></div>
-
-         {/* Secondary Glow - Purple/White (Elegant Light) */}
-         <div 
-            className="absolute top-[20%] right-[10%] w-[60vw] h-[60vw] bg-purple-100/50 rounded-full mix-blend-multiply filter blur-[100px] opacity-50 animate-float-medium"
-            style={{ transform: `translate(${mousePos.x * -0.5}px, ${mousePos.y * -0.5}px)` }}
-         ></div>
-         
-         {/* Base Texture for Professional Feel */}
+         <div className="absolute -top-[10%] left-[10%] w-[80vw] h-[80vw] bg-indigo-100/40 rounded-full mix-blend-multiply filter blur-[120px] opacity-60 animate-float-slow" style={{ transform: `translate(${mousePos.x * 0.5}px, ${mousePos.y * 0.5}px)` }}></div>
+         <div className="absolute top-[20%] right-[10%] w-[60vw] h-[60vw] bg-purple-100/50 rounded-full mix-blend-multiply filter blur-[100px] opacity-50 animate-float-medium" style={{ transform: `translate(${mousePos.x * -0.5}px, ${mousePos.y * -0.5}px)` }}></div>
          <div className="absolute inset-0 opacity-[0.2] bg-[url('https://grainy-gradients.vercel.app/noise.svg')]"></div>
       </div>
-
-      <style>{`
-        @keyframes float {
-          0% { transform: translate(0px, 0px) scale(1); }
-          33% { transform: translate(10px, -20px) scale(1.05); }
-          66% { transform: translate(-10px, 10px) scale(0.95); }
-          100% { transform: translate(0px, 0px) scale(1); }
-        }
-        .animate-float-slow { animation: float 25s ease-in-out infinite; }
-        .animate-float-medium { animation: float 20s ease-in-out infinite reverse; }
-      `}</style>
-
-      {/* Global Toast Notification */}
-      {notification && notification.visible && (
-        <div className="fixed top-6 left-1/2 transform -translate-x-1/2 z-[200] animate-bounce-in px-4 w-full max-w-md">
-           <div className="bg-green-600 text-white px-6 py-5 rounded-2xl shadow-2xl flex items-center gap-4 border border-green-500/50 backdrop-blur-sm">
-              <div className="bg-white/20 p-3 rounded-full flex-shrink-0">
-                <CheckCircle2 size={32} className="text-white" strokeWidth={3} />
-              </div>
-              <div className="flex-1">
-                 <h4 className="font-bold text-xl leading-none mb-1">{notification.message}</h4>
-                 {notification.subMessage && (
-                    <p className="text-green-100 text-sm leading-tight opacity-90">{notification.subMessage}</p>
-                 )}
-              </div>
-           </div>
-        </div>
-      )}
-
-      {/* Internal Auth Modal (Global) */}
-      {showInternalAuth && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-[100] flex items-center justify-center p-4">
-           <div className="bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl p-8 max-w-sm w-full text-center relative animate-fadeIn border border-white/50">
-              <button 
-                onClick={() => setShowInternalAuth(false)}
-                className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 hover:bg-slate-100 p-1 rounded-full transition"
-              >
-                <X size={20} />
-              </button>
-              <div className="w-16 h-16 bg-gradient-to-tr from-indigo-600 to-purple-600 rounded-2xl flex items-center justify-center mx-auto mb-6 text-white shadow-lg">
-                <Lock size={32} />
-              </div>
-              <h3 className="text-xl font-bold text-slate-800 mb-2">Acceso Corporativo</h3>
-              <p className="text-sm text-slate-500 mb-6">Área restringida. Ingrese credenciales.</p>
-              
-              <input 
-                type="password"
-                autoFocus
-                placeholder="PIN"
-                className="w-full text-center text-3xl font-mono tracking-[0.5em] p-4 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-600 focus:border-transparent mb-3 transition-all bg-white"
-                value={internalPin}
-                onChange={(e) => { setInternalPin(e.target.value); setInternalPinError(false); }}
-                onKeyDown={(e) => e.key === 'Enter' && handleInternalAuthSubmit()}
-              />
-              
-              {internalPinError && <p className="text-xs text-red-500 font-bold mb-4 bg-red-50 py-1 px-3 rounded-full inline-block">Código incorrecto</p>}
-              
-              <button 
-                onClick={handleInternalAuthSubmit}
-                className="w-full mt-2 py-4 rounded-xl bg-gradient-to-r from-indigo-700 to-purple-800 text-white font-bold text-sm hover:shadow-lg hover:-translate-y-0.5 transition-all"
-              >
-                VALIDAR ACCESO
-              </button>
-           </div>
-        </div>
-      )}
-
-      {/* Loading Indicator */}
-      {isLoading && (
-        <div className="absolute top-6 right-6 z-50 bg-white/50 backdrop-blur-md rounded-full px-4 py-2 flex items-center gap-2 shadow-sm border border-white/20">
-            <RefreshCw size={16} className="animate-spin text-indigo-600" />
-            <span className="text-xs font-bold text-slate-600">Sincronizando...</span>
-        </div>
-      )}
-      
-      {/* RENDER ACTIVE VIEW WITH RELATIVE POSITION TO SIT ON TOP OF BACKGROUND */}
-      <div className="relative z-10 flex flex-col min-h-screen">
-         {renderView()}
-      </div>
+      <style>{`@keyframes float { 0% { transform: translate(0px, 0px) scale(1); } 33% { transform: translate(10px, -20px) scale(1.05); } 66% { transform: translate(-10px, 10px) scale(0.95); } 100% { transform: translate(0px, 0px) scale(1); } } .animate-float-slow { animation: float 25s ease-in-out infinite; } .animate-float-medium { animation: float 20s ease-in-out infinite reverse; }`}</style>
+      {notification && notification.visible && (<div className="fixed top-6 left-1/2 transform -translate-x-1/2 z-[200] animate-bounce-in px-4 w-full max-w-md"><div className="bg-green-600 text-white px-6 py-5 rounded-2xl shadow-2xl flex items-center gap-4 border border-green-500/50 backdrop-blur-sm"><div className="bg-white/20 p-3 rounded-full flex-shrink-0"><CheckCircle2 size={32} className="text-white" strokeWidth={3} /></div><div className="flex-1"><h4 className="font-bold text-xl leading-none mb-1">{notification.message}</h4>{notification.subMessage && (<p className="text-green-100 text-sm leading-tight opacity-90">{notification.subMessage}</p>)}</div></div></div>)}
+      {showInternalAuth && (<div className="fixed inset-0 bg-black/60 backdrop-blur-md z-[100] flex items-center justify-center p-4"><div className="bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl p-8 max-w-sm w-full text-center relative animate-fadeIn border border-white/50"><button onClick={() => setShowInternalAuth(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 hover:bg-slate-100 p-1 rounded-full transition"><X size={20} /></button><div className="w-16 h-16 bg-gradient-to-tr from-indigo-600 to-purple-600 rounded-2xl flex items-center justify-center mx-auto mb-6 text-white shadow-lg"><Lock size={32} /></div><h3 className="text-xl font-bold text-slate-800 mb-2">Acceso Corporativo</h3><p className="text-sm text-slate-500 mb-6">Área restringida. Ingrese credenciales.</p><input type="password" autoFocus placeholder="PIN" className="w-full text-center text-3xl font-mono tracking-[0.5em] p-4 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-600 focus:border-transparent mb-3 transition-all bg-white" value={internalPin} onChange={(e) => { setInternalPin(e.target.value); setInternalPinError(false); }} onKeyDown={(e) => e.key === 'Enter' && handleInternalAuthSubmit()} />{internalPinError && <p className="text-xs text-red-500 font-bold mb-4 bg-red-50 py-1 px-3 rounded-full inline-block">Código incorrecto</p>}<button onClick={handleInternalAuthSubmit} className="w-full mt-2 py-4 rounded-xl bg-gradient-to-r from-indigo-700 to-purple-800 text-white font-bold text-sm hover:shadow-lg hover:-translate-y-0.5 transition-all">VALIDAR ACCESO</button></div></div>)}
+      {isLoading && (<div className="fixed top-6 right-6 z-50 bg-white/50 backdrop-blur-md rounded-full px-4 py-2 flex items-center gap-2 shadow-sm border border-white/20 animate-pulse"><RefreshCw size={16} className="animate-spin text-indigo-600" /><span className="text-xs font-bold text-slate-600">Sincronizando...</span></div>)}
+      <div className="relative z-10 flex flex-col min-h-screen">{renderView()}</div>
     </div>
   );
 }

@@ -1,4 +1,5 @@
 
+
 import React from 'react';
 import { Claim, EvidenceFile } from '../types';
 import { FileText, Download, ExternalLink, Image as ImageIcon } from 'lucide-react';
@@ -126,7 +127,8 @@ export const ClientReportTemplate: React.FC<ReportProps> = ({ claim }) => {
                         </div>
                     ))
                 ) : (
-                    <p className="text-sm mb-2 text-black">{claim.immediateSolution || 'En proceso de gestión.'}</p>
+                    /* FIX: Property 'immediateSolution' does not exist on type 'Claim'. Removed legacy field. */
+                    <p className="text-sm mb-2 text-black">{'En proceso de gestión.'}</p>
                 )}
              </div>
          </div>
@@ -254,14 +256,9 @@ export const FinalReportTemplate: React.FC<ReportProps> = ({ claim }) => {
                   ))}
               </div>
           ) : (
+              /* FIX: Properties like 'immediateSolution' do not exist on type 'Claim'. Replaced legacy block with a fallback message. */
               <div className="p-4 border border-slate-200 rounded mb-2">
-                 <p className="font-bold text-sm">{claim.immediateSolution}</p>
-                 <p className="text-[10px] text-slate-500 mt-2">Responsable: {claim.immediateSolutionResponsible}</p>
-                 {claim.immediateSolutionExecutionNotes && (
-                     <div className="ml-4 p-3 bg-green-50 border-l-4 border-green-500 text-xs mt-2">
-                        <strong>Ejecución:</strong> {claim.immediateSolutionExecutionNotes}
-                     </div>
-                 )}
+                 <p className="italic text-slate-500">No hay acciones de mitigación inmediata definidas.</p>
               </div>
           )}
        </div>

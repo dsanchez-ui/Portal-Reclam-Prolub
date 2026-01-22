@@ -1,4 +1,5 @@
 
+
 import React, { useState, useMemo } from 'react';
 import { 
   Search, 
@@ -282,7 +283,8 @@ export const CommercialDashboard: React.FC<CommercialDashboardProps> = ({
                      {claim.tasks && claim.tasks.length > 0 && (
                         <span className="text-[9px] font-bold text-blue-600 flex items-center gap-1"><FlaskConical size={10}/> Plan Acción Activo</span>
                      )}
-                     {claim.immediateSolution && (
+                     {/* FIX: Property 'immediateSolution' does not exist on type 'Claim'. Changed to check mitigationActions array. */}
+                     {claim.mitigationActions && claim.mitigationActions.length > 0 && (
                         <span className="text-[9px] font-bold text-amber-600 flex items-center gap-1"><CheckCircle2 size={10}/> Mitigación Enviada</span>
                      )}
                   </div>

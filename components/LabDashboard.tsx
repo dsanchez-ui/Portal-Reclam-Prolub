@@ -9,7 +9,7 @@ import {
 import { Claim, ClaimStatus, InternalRole, IshikawaEntry, Task, EvidenceFile, MitigationAction } from '../types';
 import { enhanceIshikawaObservation, enhanceTaskInstruction, enhanceImmediateSolution } from '../services/geminiService';
 import { ClientReportTemplate, FinalReportTemplate } from './ReportTemplates';
-import { deleteClaimFromSheet, uploadPdfToDrive, closeClaimSimple } from '../services/sheetsService';
+import { uploadPdfToDrive, closeClaimSimple, deleteTaskFromSheet, deleteMitigationFromSheet } from '../services/sheetsService';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 
@@ -112,11 +112,12 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
   const [executionNote, setExecutionNote] = useState('');
   const [executionFile, setExecutionFile] = useState<File | null>(null);
   const [executingTaskId, setExecutingTaskId] = useState<string | null>(null); 
-  const [executingMitigationId, setExecutingMitigationId] = useState<string | null>(null); // NEW for Mitigation Execution
+  const [executingMitigationId, setExecutingMitigationId] = useState<string | null>(null);
 
   const [isEnhancing, setIsEnhancing] = useState(false);
   const [isSavingPdf, setIsSavingPdf] = useState(false);
   const [isClosingCase, setIsClosingCase] = useState(false);
+  const [isDeletingItem, setIsDeletingItem] = useState(false); // Global deleting state for feedback
   const printRef = useRef<HTMLDivElement>(null);
   const [reportMode, setReportMode] = useState<'CLIENT' | 'FINAL' | null>(null);
 
@@ -126,13 +127,13 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
   }, [currentRole]);
 
   useEffect(() => {
-    if (selectedClaim && !isClosingCase) {
+    if (selectedClaim && !isClosingCase && !isDeletingItem) {
         const freshClaim = claims.find(c => c.id === selectedClaim.id);
         if (freshClaim && freshClaim !== selectedClaim) {
             setSelectedClaim(freshClaim);
         }
     }
-  }, [claims, selectedClaim, isClosingCase]);
+  }, [claims, selectedClaim, isClosingCase, isDeletingItem]);
 
   useEffect(() => {
     if (currentRole && claims.length > 0 && !hasCheckedSLA) {
@@ -342,15 +343,20 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
     setTaskInput({ ...taskInput, description: '' });
   };
 
-  const handleDeleteTask = (taskId: string) => {
-      if (!selectedClaim || !selectedClaim.tasks) return;
-      // Allow deletion even if executed to let admins fix mistakes
+  const handleDeleteTask = async (taskId: string) => {
+      if (!selectedClaim) return;
       if (!window.confirm("¿Confirmar eliminación de esta tarea?")) return;
-      
-      const updatedTasks = selectedClaim.tasks.filter(t => t.id !== taskId);
-      const updated = { ...selectedClaim, tasks: updatedTasks };
-      onUpdateClaim(updated);
-      setSelectedClaim(updated);
+
+      setIsDeletingItem(true);
+      try {
+        await deleteTaskFromSheet(taskId);
+        await onRefresh();
+      } catch (e) {
+        console.error(e);
+        alert("Error al eliminar la tarea.");
+      } finally {
+        setIsDeletingItem(false);
+      }
   };
 
   // --- MITIGATION ACTIONS LOGIC ---
@@ -368,11 +374,10 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
 
       const updatedActions = [...(selectedClaim.mitigationActions || []), newAction];
       
-      const updated = { 
+      const updated: any = { 
           ...selectedClaim, 
           mitigationActions: updatedActions,
           // Legacy fields for backward compatibility
-          immediateSolution: updatedActions.map(a => `• ${a.description}`).join('\n'),
           immediateSolutionStatus: 'Pending' as const
       };
       
@@ -381,21 +386,20 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
       setImmediateInput(''); 
   };
 
-  const handleDeleteMitigation = (actionId: string) => {
-      if (!selectedClaim || !selectedClaim.mitigationActions) return;
-      
-      // Allow deletion to fix mistakes (Admin override logic implicitly by button visibility)
+  const handleDeleteMitigation = async (actionId: string) => {
+      if (!selectedClaim) return;
       if (!window.confirm("¿Confirmar eliminación de esta acción de mitigación?")) return;
-      
-      const updatedActions = selectedClaim.mitigationActions.filter(a => a.id !== actionId);
-      const updated = {
-          ...selectedClaim,
-          mitigationActions: updatedActions,
-          // Sync legacy string
-          immediateSolution: updatedActions.map(a => `• ${a.description}`).join('\n'),
-      };
-      onUpdateClaim(updated);
-      setSelectedClaim(updated);
+
+      setIsDeletingItem(true);
+      try {
+        await deleteMitigationFromSheet(actionId);
+        await onRefresh();
+      } catch (e) {
+        console.error(e);
+        alert("Error al eliminar la mitigación.");
+      } finally {
+        setIsDeletingItem(false);
+      }
   };
 
   const handleExecuteMitigation = (actionId: string) => {
@@ -690,7 +694,7 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
   }
 
   return (
-    <div className="h-screen bg-slate-50 flex flex-col font-sans relative">
+    <div className={`h-screen bg-slate-50 flex flex-col font-sans relative ${isDeletingItem ? 'cursor-wait' : ''}`}>
        {/* SLA Alert & Modals ... */}
        {showSLAAlert && (
           <div className="fixed inset-0 z-[200] bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm animate-fadeIn">
@@ -806,7 +810,8 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                         <p className="text-xs text-slate-500 mb-2 line-clamp-2 italic">"{claim.description}"</p>
                         <div className="flex justify-between text-[10px] text-slate-400 items-center">
                             <span>{claim.id}</span>
-                            {claim.immediateSolutionExecutionNotes && !claim.immediateSolutionDate && <span className="flex items-center gap-1 text-orange-500 font-bold"><Clock size={10} /> Por Aprobar</span>}
+                            {/* FIX: Properties 'immediateSolutionExecutionNotes' and 'immediateSolutionDate' do not exist on type 'Claim'. Replaced with a check on 'mitigationActions'. */}
+                            {claim.mitigationActions?.some(m => m.executionNotes && m.status === 'Pending') && <span className="flex items-center gap-1 text-orange-500 font-bold"><Clock size={10} /> Por Aprobar</span>}
                         </div>
                     </div>
                 ))}
@@ -956,9 +961,18 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                       <div className="space-y-4">
                           {selectedClaim.mitigationActions && selectedClaim.mitigationActions.length > 0 ? (
                               selectedClaim.mitigationActions.map((action) => (
-                                  <div key={action.id} className={`bg-white p-4 rounded-xl border shadow-sm ${action.status === 'Approved' ? 'border-green-200 bg-green-50/20' : 'border-amber-100'}`}>
+                                  <div key={action.id} className={`group relative bg-white p-4 rounded-xl border shadow-sm ${action.status === 'Approved' ? 'border-green-200 bg-green-50/20' : 'border-amber-100'}`}>
+                                      {isAdminRole && (
+                                          <button 
+                                            onClick={(e) => { e.stopPropagation(); handleDeleteMitigation(action.id); }} 
+                                            className="absolute top-2 right-2 p-1.5 bg-white/80 text-red-400 rounded-full opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-50 hover:text-red-600 shadow-sm z-10 pointer-events-auto"
+                                            title="Eliminar Mitigación"
+                                          >
+                                              <Trash2 size={14} />
+                                          </button>
+                                      )}
                                       <div className="flex justify-between items-start mb-2">
-                                          <div className="flex-1">
+                                          <div className="flex-1 pr-6">
                                               <div className="font-medium text-amber-900 text-sm mb-1 whitespace-pre-wrap">{action.description}</div>
                                               <div className="flex gap-2">
                                                   <span className="text-amber-700 font-bold text-xs bg-amber-50 px-2 py-0.5 rounded">Resp: {action.assignedTo}</span>
@@ -967,9 +981,6 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                                                   </span>
                                               </div>
                                           </div>
-                                          {isAdminRole && (
-                                              <button onClick={() => handleDeleteMitigation(action.id)} className="text-red-300 hover:text-red-500 p-1 hover:bg-red-50 rounded transition"><Trash2 size={16} /></button>
-                                          )}
                                       </div>
 
                                       {/* Execution Button */}
@@ -1074,17 +1085,25 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                       )}
                       <div className="space-y-4">
                          {visibleTasks.length > 0 ? visibleTasks.map((t) => (
-                             <div key={t.id} className={`flex flex-col p-4 rounded-xl border transition-all ${t.status === 'Realized' ? 'bg-green-50 border-green-200' : 'bg-white border-slate-200 shadow-sm hover:shadow-md'}`}>
+                             <div key={t.id} className={`group relative flex flex-col p-4 rounded-xl border transition-all ${t.status === 'Realized' ? 'bg-green-50 border-green-200' : 'bg-white border-slate-200 shadow-sm hover:shadow-md'}`}>
+                                 {isAdminRole && (
+                                      <button 
+                                        onClick={(e) => { e.stopPropagation(); handleDeleteTask(t.id); }} 
+                                        className="absolute top-2 right-2 p-1.5 bg-white/80 text-red-400 rounded-full opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-50 hover:text-red-600 shadow-sm z-10 pointer-events-auto"
+                                        title="Eliminar Tarea"
+                                      >
+                                          <Trash2 size={14} />
+                                      </button>
+                                 )}
                                  <div className="flex justify-between items-start mb-2">
                                      <div className="flex items-center gap-2">
                                          <span className="text-xs font-bold uppercase bg-slate-200 text-slate-600 px-2 py-0.5 rounded">{t.assignedTo}</span>
-                                         <p className="font-medium text-slate-800">{t.description}</p>
+                                         <p className="font-medium text-slate-800 pr-6">{t.description}</p>
                                      </div>
                                      <div className="flex items-center gap-2">
                                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${t.status === 'Realized' ? 'bg-green-200 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
                                              {t.status === 'Realized' ? 'EJECUTADO' : 'PENDIENTE'}
                                          </span>
-                                         {isAdminRole && selectedClaim.actionPlanStatus !== 'Approved' && <button onClick={() => handleDeleteTask(t.id)} className="text-slate-300 hover:text-red-500 p-1"><Trash2 size={14}/></button>}
                                      </div>
                                  </div>
                                  {t.status === 'Pending' && canExecute(t.assignedTo) && executingTaskId !== t.id && (
