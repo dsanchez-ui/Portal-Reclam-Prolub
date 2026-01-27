@@ -818,9 +818,10 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
             reader.readAsDataURL(pdfBlob);
             reader.onloadend = async () => {
                 const base64data = (reader.result as string).split(',')[1];
-                const success = await uploadPdfToDrive(selectedClaim.id, fileName, base64data);
+                // PASSING THE REPORT MODE ('CLIENT' OR 'FINAL') TO THE SERVICE
+                const success = await uploadPdfToDrive(selectedClaim.id, fileName, base64data, reportMode || 'FINAL');
                 if (success) {
-                    alert("PDF Guardado exitosamente en la carpeta del caso en Drive.");
+                    alert("PDF Guardado exitosamente en la carpeta correspondiente de Drive.");
                 } else {
                     alert("Error al guardar en Drive.");
                 }
@@ -835,6 +836,7 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
   };
 
   const handleEnhance = async (type: 'ishikawa' | 'task' | 'immediate') => {
+      // ... same implementation ...
       setIsEnhancing(true);
       try {
         if (type === 'ishikawa' && ishikawaInput.observation) {
@@ -851,6 +853,7 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
   };
 
   if (!currentRole) {
+    // ... same implementation ...
     return (
       <div className="min-h-screen flex flex-col bg-slate-50 font-sans">
         <header className="bg-white/80 border-b border-slate-200 sticky top-0 z-50 px-6 py-4 flex justify-between items-center">
@@ -880,6 +883,7 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
   const isAdminRole = currentRole === InternalRole.LAB || currentRole === InternalRole.AUDIT;
   
   const canExecute = (assignedTo: string | undefined) => {
+      // ... same ...
       if (!assignedTo) return false;
       if (assignedTo === currentRole) return true;
       if (assignedTo === 'Calidad' && currentRole === InternalRole.QUALITY_AUX) return true;
@@ -914,6 +918,7 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                   </div>
 
                   <div ref={indicatorsRef} className="bg-slate-50 p-4 -m-4">
+                      {/* ... Indicators Layout ... */}
                       {/* FILTERS */}
                       <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 mb-6 flex flex-col md:flex-row gap-4 justify-between items-center">
                           <div className="flex items-center gap-2 bg-slate-50 p-1 rounded-lg border border-slate-200">
@@ -1072,7 +1077,7 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
 
   return (
     <div className={`h-screen bg-slate-50 flex flex-col font-sans relative ${isProcessingAction ? 'cursor-wait' : ''}`}>
-       {/* SLA Alert & Modals ... */}
+       {/* SLA Alert & Modals ... (Rest of the component remains the same) */}
        {showSLAAlert && (
           <div className="fixed inset-0 z-[200] bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm animate-fadeIn">
               <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 text-center relative border-4 border-white/20">
@@ -1102,12 +1107,11 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
           </div>
        )}
 
-       {/* UNIFIED CONFIRMATION MODAL */}
+       {/* ... Confirm Modal & Rest of UI ... */}
        {confirmModal.isOpen && (
            <div className="fixed inset-0 z-[300] bg-black/60 flex items-center justify-center p-4 backdrop-blur-sm animate-fadeIn">
                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center border border-white/20">
-                   
-                   {/* DYNAMIC ICON */}
+                   {/* ... Modal Content ... */}
                    {(confirmModal.type === 'DELETE_TASK' || confirmModal.type === 'DELETE_MITIGATION' || confirmModal.type === 'DELETE_CLAIM') ? (
                        <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 text-red-600">
                            <Trash2 size={32} />
@@ -1213,27 +1217,19 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
           <aside className={`w-full md:w-96 bg-white border-r border-slate-200 overflow-y-auto flex-shrink-0 ${selectedClaim ? 'hidden md:block' : 'block'}`}>
              {currentRole === InternalRole.AUDIT && (
                  <div className="p-6 space-y-4">
-                     {/* 1. Aprobar Soluciones Inmediatas */}
+                     {/* ... Filter Buttons ... */}
                      <button onClick={() => setAuditFilter('APPROVAL_READY')} className={`w-full p-4 rounded-xl flex items-center gap-3 transition font-bold text-left ${auditFilter === 'APPROVAL_READY' ? 'bg-orange-500 text-white shadow-lg shadow-orange-200' : 'bg-white text-slate-600 hover:bg-slate-50 border'}`}>
                          <Zap size={20} /> Aprobar Soluciones Inmediatas
                      </button>
-                     
-                     {/* 2. Soluciones Inmediatas Pendientes por Ejecutar */}
                      <button onClick={() => setAuditFilter('PENDING_EXECUTION')} className={`w-full p-4 rounded-xl flex items-center gap-3 transition font-bold text-left ${auditFilter === 'PENDING_EXECUTION' ? 'bg-yellow-500 text-white shadow-lg shadow-yellow-200' : 'bg-white text-slate-600 hover:bg-slate-50 border'}`}>
                          <Clock size={20} /> Soluciones Pendientes (Ejecución)
                      </button>
-
-                     {/* 3. Plan de Acción Pendiente */}
                      <button onClick={() => setAuditFilter('ACTION_PLAN_PENDING')} className={`w-full p-4 rounded-xl flex items-center gap-3 transition font-bold text-left ${auditFilter === 'ACTION_PLAN_PENDING' ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'bg-white text-slate-600 hover:bg-slate-50 border'}`}>
                          <ClipboardList size={20} /> Plan de Acción Pendiente
                      </button>
-
-                     {/* 4. Tickets Pendientes por Cierre Administrativo */}
                      <button onClick={() => setAuditFilter('CLOSURE_READY')} className={`w-full p-4 rounded-xl flex items-center gap-3 transition font-bold text-left ${auditFilter === 'CLOSURE_READY' ? 'bg-purple-600 text-white shadow-lg shadow-purple-200' : 'bg-white text-slate-600 hover:bg-slate-50 border'}`}>
                          <Lock size={20} /> Tickets Pendientes Cierre Admin.
                      </button>
-
-                     {/* 5. Histórico Solicitudes Cerradas */}
                      <button onClick={() => setAuditFilter('HISTORY')} className={`w-full p-4 rounded-xl flex items-center gap-3 transition font-bold text-left ${auditFilter === 'HISTORY' ? 'bg-slate-700 text-white shadow-lg shadow-slate-200' : 'bg-white text-slate-600 hover:bg-slate-50 border'}`}>
                          <History size={20} /> Histórico Solicitudes Cerradas
                      </button>
@@ -1248,6 +1244,7 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
              <div className="px-4 pb-4 space-y-3">
                 {filteredClaims.map(claim => (
                     <div key={claim.id} onClick={() => setSelectedClaim(claim)} className={`p-4 rounded-xl border cursor-pointer hover:shadow-md transition-shadow group relative ${selectedClaim?.id === claim.id ? 'bg-indigo-50 border-indigo-500 ring-1 ring-indigo-500' : 'bg-white border-slate-200'}`}>
+                        {/* ... Claim List Item Content ... */}
                         <div className="flex justify-between items-start mb-2">
                             <span className="font-bold text-sm text-slate-800 truncate flex-1">{claim.client}</span>
                             <span className={`text-[10px] px-2 py-0.5 rounded-full border ${claim.status === ClaimStatus.CLOSED ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>{claim.status}</span>
@@ -1255,7 +1252,6 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                         <p className="text-xs text-slate-500 mb-2 line-clamp-2 italic">"{claim.description}"</p>
                         <div className="flex justify-between text-[10px] text-slate-400 items-center">
                             <span>{claim.id}</span>
-                            {/* FIX: Properties 'immediateSolutionExecutionNotes' and 'immediateSolutionDate' do not exist on type 'Claim'. Replaced with a check on 'mitigationActions'. */}
                             {claim.mitigationActions?.some(m => m.executionNotes && m.status === 'Pending') && <span className="flex items-center gap-1 text-orange-500 font-bold"><Clock size={10} /> Por Aprobar</span>}
                         </div>
                     </div>
@@ -1282,7 +1278,6 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                                  <>
                                     <button onClick={() => openConfirmModal('DELETE_CLAIM', selectedClaim.id)} className="p-2 text-red-500 hover:bg-red-50 rounded" title="Eliminar Caso"><Trash2 size={20}/></button>
                                     
-                                    {/* ARCHIVE BUTTON - NEW FEATURE */}
                                     <button 
                                         onClick={() => openConfirmModal('ARCHIVE_CLAIM', selectedClaim.id)} 
                                         className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded" 
@@ -1291,10 +1286,8 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                                         <EyeOff size={20}/>
                                     </button>
                                     
-                                    {/* BOTÓN 1: SOLO VER INFORME PDF */}
                                     <button onClick={handlePreviewFinalReport} disabled={selectedClaim.immediateSolutionStatus !== 'Approved'} className="px-4 py-2 bg-indigo-600 text-white rounded text-sm font-bold shadow-sm flex gap-2 hover:bg-indigo-700 disabled:opacity-50"><Printer size={16}/> Ver Informe Cierre</button>
                                     
-                                    {/* MODIFIED BUTTON 2B: CIERRE DEFINITIVO (SOLO APARECE SI PLAN APROBADO) */}
                                     {currentRole === InternalRole.AUDIT && selectedClaim.status !== ClaimStatus.CLOSED && selectedClaim.actionPlanStatus === 'Approved' && (
                                         <button 
                                             onClick={() => openConfirmModal('CLOSE_CASE_DEFINITIVE')} 
@@ -1305,19 +1298,17 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                                         </button>
                                     )}
                                     
-                                    {/* BOTÓN 3: REPORTE CLIENTE */}
                                     <button onClick={() => setReportMode('CLIENT')} disabled={selectedClaim.immediateSolutionStatus !== 'Approved'} className="px-4 py-2 bg-white border rounded text-sm font-bold shadow-sm flex gap-2 hover:bg-slate-50 disabled:opacity-50"><FileText size={16}/> Reporte Cliente</button>
                                  </>
                                )}
                            </div>
                        </div>
                        
+                       {/* ... Rest of Claim Details ... */}
                        <div className="p-6">
-                           {/* SLAs */}
                            <div className="flex gap-2 mb-6">
                               {(() => {
                                   const daysOpen = getDaysPassed(selectedClaim.date);
-                                  // Global SLA Met check: based on derived status
                                   const clientSlaMet = selectedClaim.immediateSolutionStatus === 'Approved';
                                   return (
                                     <>
@@ -1390,8 +1381,10 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                    </div>
 
                    {/* --- SECTIONS (MITIGATION, ISHIKAWA, TASKS) --- */}
-                   {/* 1. MITIGATION SECTION - REFACTORED TO LIST ITEMS */}
+                   {/* ... (Existing Implementation for Mitigation, Ishikawa, Tasks) ... */}
+                   {/* Just copying the wrapper div for brevity, assume content inside is unchanged from previous request unless specified */}
                    <div className={`p-6 rounded-xl shadow-sm border ${selectedClaim.immediateSolutionStatus === 'Approved' ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200'}`}>
+                      {/* ... Mitigation Content ... */}
                       <div className="flex justify-between items-center mb-4">
                           <h3 className={`text-lg font-bold flex items-center gap-2 ${selectedClaim.immediateSolutionStatus === 'Approved' ? 'text-green-900' : 'text-amber-900'}`}><Zap size={20}/> Acción de Mitigación Inmediata</h3>
                           {selectedClaim.immediateSolutionStatus === 'Approved' && <span className="text-xs font-bold bg-green-200 text-green-800 px-2 py-1 rounded flex items-center gap-1"><CheckCircle2 size={12}/> Mitigado / Aprobado</span>}
@@ -1399,6 +1392,7 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                       
                       {isAdminRole && selectedClaim.status !== ClaimStatus.CLOSED && (
                           <div className="space-y-3 border-b border-amber-200 pb-4 mb-4">
+                             {/* ... Input fields ... */}
                              <p className="text-xs text-amber-700 font-bold mb-1">Agregar nueva instrucción:</p>
                              <div className="flex gap-2">
                                 <select className="p-3 rounded-lg border border-amber-200 bg-white text-slate-900 w-40" value={immediateResponsible} onChange={e => setImmediateResponsible(e.target.value)}>
@@ -1415,6 +1409,7 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                           {selectedClaim.mitigationActions && selectedClaim.mitigationActions.length > 0 ? (
                               selectedClaim.mitigationActions.map((action) => (
                                   <div key={action.id} className={`group relative bg-white p-4 rounded-xl border shadow-sm ${action.status === 'Approved' ? 'border-green-200 bg-green-50/20' : 'border-amber-100'}`}>
+                                      {/* ... Action Item ... */}
                                       <div className="flex justify-between items-start mb-2">
                                           <div className="flex-1 pr-6">
                                               <div className="font-medium text-amber-900 text-sm mb-1 whitespace-pre-wrap">{action.description}</div>
@@ -1435,8 +1430,7 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                                               </div>
                                           </div>
                                       </div>
-
-                                      {/* Execution Button */}
+                                      {/* ... Execution Buttons ... */}
                                       {canExecute(action.assignedTo) && action.status === 'Pending' && executingMitigationId !== action.id && (
                                           <div className="mt-2">
                                               <button onClick={() => handleExecuteMitigation(action.id)} className="bg-amber-600 text-white px-4 py-2 rounded-lg font-bold text-xs hover:bg-amber-700 transition flex items-center gap-2 shadow-lg shadow-amber-200">
@@ -1444,8 +1438,7 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                                               </button>
                                           </div>
                                       )}
-
-                                      {/* Execution Form */}
+                                      {/* ... Execution Form ... */}
                                       {executingMitigationId === action.id && (
                                           <div className="mt-4 bg-slate-50 p-4 rounded-lg border border-slate-200 animate-fadeIn">
                                               <h4 className="font-bold text-slate-700 mb-2 text-sm">Reportar Ejecución</h4>
@@ -1457,8 +1450,7 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                                               </div>
                                           </div>
                                       )}
-
-                                      {/* Notes & Evidence */}
+                                      {/* ... Execution Display ... */}
                                       {action.executionNotes && (
                                           <div className="mt-3 pt-3 border-t border-amber-100 text-sm text-slate-600">
                                               <p className="font-bold text-green-700 mb-1 text-xs uppercase tracking-wide">Ejecución:</p>
@@ -1471,7 +1463,6 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                                                       </button>
                                                   ) : <span></span>}
 
-                                                  {/* APPROVAL BUTTON PER ITEM */}
                                                   {currentRole === InternalRole.AUDIT && action.status === 'Pending' && (
                                                       <button onClick={() => approveMitigation(action.id)} className="bg-green-600 text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-green-700 transition flex items-center gap-1 shadow-sm">
                                                           <CheckCircle2 size={12}/> Aprobar Item
@@ -1488,7 +1479,7 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                       </div>
                    </div>
 
-                   {/* 2. ISHIKAWA */}
+                   {/* ... Ishikawa Section ... */}
                    <div className={`bg-white p-6 rounded-xl shadow-sm border ${selectedClaim.actionPlanStatus === 'Approved' ? 'border-green-200 bg-green-50/20' : 'border-slate-200'}`}>
                       <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
                         <Stethoscope size={20} className="text-indigo-600"/> Análisis de Causa (Ishikawa)
@@ -1508,7 +1499,6 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                          {selectedClaim.ishikawaList?.map((e, i) => (
                              <div key={i} className="flex gap-2 text-sm bg-slate-50 p-2 rounded border"><strong className="text-indigo-700">{e.category}:</strong> {e.observation}</div>
                          ))}
-                         {/* Empty State for Ishikawa */}
                          {(!selectedClaim.ishikawaList || selectedClaim.ishikawaList.length === 0) && (
                              <div className="text-center py-4 text-slate-400 italic text-sm border-2 border-dashed border-slate-100 rounded-lg">
                                 No hay hallazgos registrados. Agregue uno arriba (+).
@@ -1517,7 +1507,7 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                       </div>
                    </div>
 
-                   {/* 3. TASKS */}
+                   {/* ... Tasks Section ... */}
                    <div className={`bg-white p-6 rounded-xl shadow-sm border ${selectedClaim.actionPlanStatus === 'Approved' ? 'border-green-200 bg-green-50/20' : 'border-slate-200'}`}>
                       <div className="flex justify-between items-center mb-4">
                          <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
@@ -1545,7 +1535,6 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                                          <p className="font-medium text-slate-800 pr-6">{t.description}</p>
                                      </div>
                                      <div className="flex items-center gap-2">
-                                         {/* VISUAL CHANGE: IF PLAN IS APPROVED, SHOW 'APROBADO' IN BLUE INSTEAD OF 'EJECUTADO' IN GREEN */}
                                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${t.status === 'Realized' ? (selectedClaim.actionPlanStatus === 'Approved' ? 'bg-blue-100 text-blue-800 border border-blue-200' : 'bg-green-200 text-green-800') : 'bg-yellow-100 text-yellow-800'}`}>
                                              {t.status === 'Realized' ? (selectedClaim.actionPlanStatus === 'Approved' ? 'APROBADO' : 'EJECUTADO') : 'PENDIENTE'}
                                          </span>
@@ -1591,7 +1580,7 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                          )) : <div className="text-center py-10 text-slate-400 bg-slate-50/50 rounded-xl border border-dashed border-slate-200"><ClipboardCheck size={32} className="mx-auto mb-2 opacity-50"/><p className="text-sm">No tienes tareas asignadas en este caso.</p></div>}
                       </div>
                       
-                      {/* BUTTON MOVED HERE: APPROVE ACTION PLAN */}
+                      {/* ... Approve Plan Button ... */}
                       {currentRole === InternalRole.AUDIT && selectedClaim.status !== ClaimStatus.CLOSED && selectedClaim.actionPlanStatus !== 'Approved' && canApproveActionPlan && (
                           <div className="mt-6 flex justify-end border-t border-slate-100 pt-4 relative z-10">
                                <button 

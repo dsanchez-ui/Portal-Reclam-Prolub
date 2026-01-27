@@ -108,9 +108,13 @@ export interface Claim {
   internalCloseDate?: string;
   
   driveFolderUrl?: string;
+  driveClientFolderUrl?: string; // New field for the client-specific subfolder
   
   // New Flag for visibility management
   archived?: boolean;
+  
+  // Concurrency Control
+  lastUpdated?: string; // Epoch timestamp string
 }
 
 export interface UserUser {

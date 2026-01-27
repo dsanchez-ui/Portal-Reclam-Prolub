@@ -155,6 +155,19 @@ export default function App() {
 
   useEffect(() => {
     loadClaims();
+    
+    // Polling Mechanism: Refresh every 30 seconds
+    const interval = setInterval(() => {
+        // Only silent refresh if not currently in a loading state to avoid flickers/blocks
+        if (!isLoading) {
+            console.log("Polling updates...");
+            getClaimsFromSheet().then(data => {
+                if(data && data.length > 0) setClaims(data);
+            }).catch(e => console.error("Polling failed", e));
+        }
+    }, 30000);
+
+    return () => clearInterval(interval);
   }, []);
 
   const loadClaims = async () => {
@@ -219,8 +232,16 @@ export default function App() {
 
   const handleLabUpdate = async (updatedClaim: Claim, newFiles: File[] = []) => {
     setIsLoading(true);
-    await updateClaimInSheet(updatedClaim, newFiles);
-    await loadClaims(); // RE-FETCH from the single source of truth
+    // Modified to handle status response
+    const result = await updateClaimInSheet(updatedClaim, newFiles);
+    
+    if (!result.success && result.error === 'STALE_DATA') {
+        alert("¡ATENCIÓN! Los datos han sido modificados por otro usuario mientras usted editaba.\n\nLa página se recargará para mostrar la información más reciente. Por favor, vuelva a intentar su acción.");
+    } else if (!result.success) {
+        alert(`Error al guardar: ${result.error}`);
+    }
+
+    await loadClaims(); // Always re-fetch to sync state
     setIsLoading(false);
   };
 

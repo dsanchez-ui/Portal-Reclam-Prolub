@@ -40,7 +40,7 @@ export const saveClaimToSheet = async (claim: any, rawFiles: File[] = []) => {
   } catch (error) { console.error("Error saving to sheet:", error); }
 };
 
-export const updateClaimInSheet = async (claim: any, rawFiles: File[] = []) => {
+export const updateClaimInSheet = async (claim: any, rawFiles: File[] = []): Promise<{success: boolean, error?: string}> => {
   try {
     const processedRawFiles = [];
     if (rawFiles && rawFiles.length > 0) {
@@ -56,13 +56,26 @@ export const updateClaimInSheet = async (claim: any, rawFiles: File[] = []) => {
       rawFiles: processedRawFiles
     };
 
-    await fetch(GOOGLE_SCRIPT_URL, {
+    const response = await fetch(GOOGLE_SCRIPT_URL, {
       method: 'POST',
       mode: 'cors',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify(payload)
     });
-  } catch (error) { console.error("Error updating sheet:", error); }
+
+    const json = await response.json();
+    if (json.result === 'error') {
+        if (json.code === 'STALE_DATA') {
+            return { success: false, error: 'STALE_DATA' };
+        }
+        return { success: false, error: json.message || 'Unknown error' };
+    }
+    return { success: true };
+
+  } catch (error) { 
+      console.error("Error updating sheet:", error);
+      return { success: false, error: String(error) };
+  }
 };
 
 export const closeClaimSimple = async (id: string, closeDate: string) => {
@@ -135,7 +148,7 @@ export const deleteMitigationFromSheet = async (mitigationId: string) => {
     } catch (error) { console.error("Error deleting mitigation:", error); }
 };
 
-export const uploadPdfToDrive = async (claimId: string, fileName: string, base64Data: string) => {
+export const uploadPdfToDrive = async (claimId: string, fileName: string, base64Data: string, reportType: 'CLIENT' | 'FINAL') => {
     try {
         await fetch(GOOGLE_SCRIPT_URL, {
             method: 'POST',
@@ -145,7 +158,8 @@ export const uploadPdfToDrive = async (claimId: string, fileName: string, base64
                 action: 'save_pdf', 
                 claimId: claimId,
                 fileName: fileName,
-                base64: base64Data
+                base64: base64Data,
+                reportType: reportType
             })
         });
         return true;
