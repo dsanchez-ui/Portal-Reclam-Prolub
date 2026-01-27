@@ -4,7 +4,7 @@ import { CommercialWizard } from './components/CommercialWizard';
 import { LabDashboard } from './components/LabDashboard';
 import { CommercialDashboard } from './components/CommercialDashboard';
 import { AppView, Claim, ClaimStatus, Brand, IncidentType } from './types';
-import { saveClaimToSheet, updateClaimInSheet, getClaimsFromSheet, deleteClaimFromSheet } from './services/sheetsService';
+import { saveClaimToSheet, updateClaimInSheet, getClaimsFromSheet, deleteClaimFromSheet, sendClaimNotification } from './services/sheetsService';
 import { 
   Briefcase, 
   FlaskConical, 
@@ -196,15 +196,31 @@ export default function App() {
       ...newClaimData
     };
 
-    await saveClaimToSheet(newClaim, rawFiles);
-    await loadClaims(); // RE-FETCH from the single source of truth
+    // 1. Save Data (Sheet + Drive)
+    const result = await saveClaimToSheet(newClaim, rawFiles);
+    
+    if (result.success) {
+         // 2. Send Email (Only if save succeeded)
+         // PASS THE GENERATED DRIVE URLs TO THE EMAIL SERVICE
+         const claimForEmail = {
+            ...newClaim,
+            driveFolderUrl: result.driveFolderUrl,
+            driveClientFolderUrl: result.driveClientFolderUrl
+         };
+         
+         await sendClaimNotification(claimForEmail);
+         
+         await loadClaims(); // RE-FETCH from the single source of truth
 
-    setCurrentView(AppView.COMMERCIAL_DASHBOARD);
+        setCurrentView(AppView.COMMERCIAL_DASHBOARD);
+        showSuccessNotification(
+            "¡Reclamación Exitosa!",
+            "Su caso ha sido enviado al laboratorio correctamente."
+        );
+    } else {
+        alert("Hubo un error al guardar el caso. Por favor intente nuevamente.");
+    }
     setIsLoading(false);
-    showSuccessNotification(
-        "¡Reclamación Exitosa!",
-        "Su caso ha sido enviado al laboratorio correctamente."
-    );
   };
 
   const handleImprovementSubmit = async (data: any, files: File[]) => {

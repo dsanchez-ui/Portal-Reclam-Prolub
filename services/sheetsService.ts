@@ -1,6 +1,6 @@
 
 // Remplaza esta URL con la que obtuviste al desplegar tu Google Apps Script
-const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz6A4fiCK1iE1HTOgqHhWEWihPdZ5Yb7Dmm7C5SzZNpNTXLRx1N1NtW_DCQfJatW-Pj/exec'; 
+const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxEIHRHNgJbxvLx0n_kfBjUQXCxU1O4d1o4Twr1XhEXD_vyimTh3T5dYyrE2Gy0LYbq/exec'; 
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -15,7 +15,7 @@ const fileToBase64 = (file: File): Promise<string> => {
   });
 };
 
-export const saveClaimToSheet = async (claim: any, rawFiles: File[] = []) => {
+export const saveClaimToSheet = async (claim: any, rawFiles: File[] = []): Promise<{success: boolean, driveFolderUrl?: string, driveClientFolderUrl?: string}> => {
   try {
     const processedRawFiles = [];
     if (rawFiles && rawFiles.length > 0) {
@@ -31,13 +31,44 @@ export const saveClaimToSheet = async (claim: any, rawFiles: File[] = []) => {
       rawFiles: processedRawFiles
     };
 
-    await fetch(GOOGLE_SCRIPT_URL, {
+    const response = await fetch(GOOGLE_SCRIPT_URL, {
       method: 'POST',
       mode: 'cors', 
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify(payload)
     });
-  } catch (error) { console.error("Error saving to sheet:", error); }
+    
+    const json = await response.json();
+    if (json.result === 'success') {
+        return { 
+            success: true, 
+            driveFolderUrl: json.driveFolderUrl,
+            driveClientFolderUrl: json.driveClientFolderUrl 
+        };
+    }
+    return { success: false };
+  } catch (error) { 
+    console.error("Error saving to sheet:", error); 
+    return { success: false };
+  }
+};
+
+export const sendClaimNotification = async (claim: any) => {
+  try {
+    await fetch(GOOGLE_SCRIPT_URL, {
+      method: 'POST',
+      mode: 'cors',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ 
+        action: 'send_notification', 
+        claimData: claim 
+      })
+    });
+    return true;
+  } catch (error) {
+    console.error("Error sending notification:", error);
+    return false;
+  }
 };
 
 export const updateClaimInSheet = async (claim: any, rawFiles: File[] = []): Promise<{success: boolean, error?: string}> => {

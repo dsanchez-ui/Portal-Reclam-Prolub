@@ -196,6 +196,8 @@ function doPost(e) {
     switch(action) {
       case 'create_claim':
         return createClaim(doc, claimData, rawFiles);
+      case 'send_notification': // New separate action
+         return sendNotificationAction(claimData);
       case 'update_claim':
         return updateClaim(doc, claimData, rawFiles);
       case 'delete_claim':
@@ -247,12 +249,18 @@ function createClaim(doc, claimData, rawFiles) {
   (claimData.mitigationActions || []).forEach(m => mitigationsSheet.appendRow([m.id, claimData.id, m.description, m.assignedTo, m.status, '', '[]', m.createdAt, '', '']));
   (claimData.ishikawaList || []).forEach(i => ishikawaSheet.appendRow([i.id, claimData.id, i.category, i.observation, i.createdAt]));
 
-  // --- SEND EMAIL NOTIFICATION ---
-  // This is synchronous, so it will happen before the return, ensuring the user sees the loading screen until email is sent.
-  sendCreationEmail(claimData);
-  // -------------------------------
+  // Return generated URLs so frontend can use them in the email trigger
+  return ContentService.createTextOutput(JSON.stringify({ 
+      result: 'success', 
+      action: 'created',
+      driveFolderUrl: driveFolderUrl,
+      driveClientFolderUrl: driveClientFolderUrl
+  })).setMimeType(ContentService.MimeType.JSON);
+}
 
-  return ContentService.createTextOutput(JSON.stringify({ result: 'success', action: 'created' })).setMimeType(ContentService.MimeType.JSON);
+function sendNotificationAction(claimData) {
+  sendCreationEmail(claimData);
+  return ContentService.createTextOutput(JSON.stringify({ result: 'success', action: 'email_sent' })).setMimeType(ContentService.MimeType.JSON);
 }
 
 function updateClaim(doc, claimData, rawFiles) {
@@ -493,35 +501,135 @@ function sendCreationEmail(claimData) {
     recipients += "," + reporterEmail;
   }
 
-  const subject = `[Confirmación] Reclamación Recibida - Caso ${claimData.id}`;
-  
+  const subject = `[NUEVO CASO] ${claimData.id} - ${claimData.client} - ${claimData.incidentType}`;
+  const appLink = "https://aistudio.google.com/apps/drive/1SFUt2yy9I85dsyR_AXJN9OI45p3G9IbF?showAssistant=true&showPreview=true";
+  const driveLink = claimData.driveFolderUrl || "#";
+
   const htmlBody = `
-    <div style="font-family: sans-serif; max-width: 600px; color: #333;">
-      <h2 style="color: #2e3b55; border-bottom: 2px solid #2e3b55; padding-bottom: 10px;">Confirmación de Nuevo Caso</h2>
-      <p>Hola <strong>${claimData.reporterName}</strong>,</p>
-      <p>Se ha registrado exitosamente su reporte en el sistema de gestión de calidad. El equipo de laboratorio ha sido notificado.</p>
-      
-      <div style="background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin: 20px 0;">
-        <p style="margin: 5px 0;"><strong>ID del Caso:</strong> ${claimData.id}</p>
-        <p style="margin: 5px 0;"><strong>Cliente:</strong> ${claimData.client}</p>
-        <p style="margin: 5px 0;"><strong>Fecha Reporte:</strong> ${claimData.date}</p>
-        <p style="margin: 5px 0;"><strong>Tipo:</strong> ${claimData.incidentType}</p>
-        <p style="margin: 5px 0;"><strong>Factura:</strong> ${claimData.invoiceNumber}</p>
+<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333; background-color: #ffffff; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px;">
+  
+  <!-- Header with Logo -->
+  <div style="text-align: center; margin-bottom: 25px;">
+    <img src="https://i.ibb.co/0RTvYnq6/Logo-Prolub-principal-3.png" alt="Prolub Logo" style="height: 50px; margin-bottom: 10px;">
+    <h1 style="color: #1e3a8a; margin: 5px 0 2px 0; font-size: 24px; font-weight: 900;">Portal de Reclamaciones Prolub</h1>
+    <p style="color: #64748b; margin: 0; font-size: 12px; letter-spacing: 0.5px;">Sistema de Gestión de Calidad & Mejora Continua</p>
+  </div>
+
+  <!-- Progress Bar (Visual Stepper) -->
+  <div style="background-color: #f8fafc; padding: 20px; border-radius: 12px; margin-bottom: 30px; text-align: center; border: 1px solid #e2e8f0;">
+      <h3 style="margin-top: 0; margin-bottom: 15px; color: #64748b; font-size: 11px; letter-spacing: 2px; text-transform: uppercase;">Estado del Proceso</h3>
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; position: relative;">
+         
+         <!-- Step 1 (Active) -->
+         <div style="width: 25%; position: relative; z-index: 10;">
+            <div style="width: 32px; height: 32px; background-color: #4f46e5; color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto; font-size: 16px; box-shadow: 0 4px 6px -1px rgba(79, 70, 229, 0.3);">📝</div>
+            <p style="font-size: 11px; font-weight: bold; margin-top: 8px; color: #1e293b; line-height: 1.2;">Reporte<br>Inicial</p>
+         </div>
+         
+         <!-- Connecting Line -->
+         <div style="position: absolute; top: 16px; left: 12.5%; width: 75%; height: 2px; background-color: #cbd5e1; z-index: 1;"></div>
+
+         <!-- Step 2 -->
+         <div style="width: 25%; position: relative; z-index: 10;">
+            <div style="width: 32px; height: 32px; background-color: #e2e8f0; color: #94a3b8; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto; font-size: 16px; border: 2px solid #fff;">⚙️</div>
+            <p style="font-size: 11px; margin-top: 8px; color: #94a3b8; line-height: 1.2;">Plan de<br>Acción</p>
+         </div>
+         
+         <!-- Step 3 -->
+         <div style="width: 25%; position: relative; z-index: 10;">
+             <div style="width: 32px; height: 32px; background-color: #e2e8f0; color: #94a3b8; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto; font-size: 16px; border: 2px solid #fff;">🔧</div>
+             <p style="font-size: 11px; margin-top: 8px; color: #94a3b8; line-height: 1.2;">Ejecución</p>
+         </div>
+         
+         <!-- Step 4 -->
+         <div style="width: 25%; position: relative; z-index: 10;">
+             <div style="width: 32px; height: 32px; background-color: #e2e8f0; color: #94a3b8; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto; font-size: 16px; border: 2px solid #fff;">✅</div>
+             <p style="font-size: 11px; margin-top: 8px; color: #94a3b8; line-height: 1.2;">Cerrado</p>
+         </div>
       </div>
+  </div>
 
-      <h3 style="color: #2e3b55;">Detalle del Producto</h3>
-      <p><strong>Referencia(s):</strong> ${claimData.productRef}</p>
-      <p><strong>Lote(s):</strong> ${claimData.batch}</p>
+  <h2 style="color: #0f172a; font-size: 20px; margin-bottom: 15px;">Nueva Solicitud Registrada</h2>
+  <p style="font-size: 14px; line-height: 1.6; color: #334155; margin-bottom: 20px;">
+    Hola <strong>${claimData.reporterName}</strong> y <strong>Equipo de Laboratorio</strong>,<br>
+    Se ha generado una nueva solicitud en el portal de reclamaciones. A continuación encontrarás todos los detalles del caso reportado:
+  </p>
 
-      <h3 style="color: #2e3b55;">Descripción del Problema</h3>
-      <div style="border-left: 4px solid #2e3b55; padding-left: 10px; color: #555;">
-        <p>${claimData.description}</p>
+  <!-- Details Grid -->
+  <table style="width: 100%; border-collapse: separate; border-spacing: 0; margin-bottom: 25px;">
+    <tr>
+      <td style="width: 50%; padding: 12px; background-color: #f8fafc; border: 1px solid #e2e8f0; border-right: none; border-top-left-radius: 8px; border-bottom-left-radius: 8px; vertical-align: top;">
+         <div style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: bold; margin-bottom: 4px;">📂 Código de Caso</div>
+         <div style="font-size: 14px; color: #0f172a; font-weight: bold;">${claimData.id}</div>
+      </td>
+      <td style="width: 50%; padding: 12px; background-color: #f8fafc; border: 1px solid #e2e8f0; border-top-right-radius: 8px; border-bottom-right-radius: 8px; vertical-align: top;">
+         <div style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: bold; margin-bottom: 4px;">🏢 Cliente</div>
+         <div style="font-size: 14px; color: #0f172a; font-weight: bold;">${claimData.client}</div>
+      </td>
+    </tr>
+    <tr><td style="height: 10px;"></td></tr>
+    <tr>
+       <td style="width: 50%; vertical-align: top; padding-right: 10px;">
+          <div style="margin-bottom: 12px;">
+             <span style="display: block; font-size: 11px; color: #64748b; font-weight: bold;">⚠️ TIPO DE INCIDENTE</span>
+             <span style="font-size: 13px; color: #334155;">${claimData.incidentType}</span>
+          </div>
+          <div style="margin-bottom: 12px;">
+             <span style="display: block; font-size: 11px; color: #64748b; font-weight: bold;">🔢 LOTE</span>
+             <span style="font-size: 13px; color: #334155;">${claimData.batch}</span>
+          </div>
+       </td>
+       <td style="width: 50%; vertical-align: top; padding-left: 10px;">
+          <div style="margin-bottom: 12px;">
+             <span style="display: block; font-size: 11px; color: #64748b; font-weight: bold;">🛢️ PRODUCTO</span>
+             <span style="font-size: 13px; color: #334155; display: block; line-height: 1.4;">${claimData.productRef}</span>
+          </div>
+          <div style="margin-bottom: 12px;">
+             <span style="display: block; font-size: 11px; color: #64748b; font-weight: bold;">📅 FECHA REPORTE</span>
+             <span style="font-size: 13px; color: #334155;">${claimData.date}</span>
+          </div>
+       </td>
+    </tr>
+  </table>
+
+  <!-- Description -->
+  <div style="margin-bottom: 25px;">
+      <div style="font-size: 11px; font-weight: bold; color: #64748b; text-transform: uppercase; margin-bottom: 6px;">📝 Descripción Inicial</div>
+      <div style="background-color: #f1f5f9; border-left: 4px solid #4f46e5; padding: 15px; color: #475569; font-style: italic; border-radius: 4px; font-size: 13px; line-height: 1.5;">
+        "${claimData.description}"
       </div>
+  </div>
 
-      <hr style="margin-top: 30px; border: 0; border-top: 1px solid #eee;">
-      <p style="font-size: 12px; color: #888;">Portal de Calidad Prolub S.A.<br>Este es un mensaje automático, por favor no responder.</p>
+  <!-- Action Required Box -->
+  <div style="background-color: #fffbeb; border: 1px solid #fcd34d; border-radius: 8px; padding: 15px; margin-bottom: 30px; text-align: left;">
+    <div style="display: flex; align-items: center; margin-bottom: 5px;">
+        <span style="font-size: 16px; margin-right: 6px;">⏱️</span>
+        <strong style="color: #b45309; font-size: 14px;">Acción Requerida:</strong>
     </div>
-  `;
+    <p style="margin: 0; color: #92400e; font-size: 13px; padding-left: 26px;">
+      Por favor, revisa el caso e inicia el análisis de la oportunidad de mejora.
+    </p>
+  </div>
+
+  <!-- Links Buttons -->
+  <div style="text-align: center; margin-bottom: 35px;">
+     <a href="${appLink}" style="display: inline-block; background-color: #4f46e5; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 14px; box-shadow: 0 4px 6px -1px rgba(79, 70, 229, 0.4); margin-bottom: 15px;">🚀 INGRESAR AL PORTAL</a>
+     <br>
+     <a href="${driveLink}" style="color: #4f46e5; font-size: 13px; text-decoration: none; display: inline-flex; align-items: center; font-weight: 600;">
+       📂 Ver Carpeta de Evidencias en Drive
+     </a>
+  </div>
+
+  <!-- Footer -->
+  <div style="border-top: 1px solid #e2e8f0; padding-top: 25px; text-align: center; font-size: 11px; color: #94a3b8; line-height: 1.6;">
+    <strong style="color: #64748b; font-size: 12px;">Prolub S.A.</strong> | Gestión de Calidad<br>
+    © ${new Date().getFullYear()} Todos los derechos reservados<br>
+    <div style="margin-top: 5px;">
+        <a href="#" style="color: #94a3b8; text-decoration: underline;">Soporte Técnico</a> | <a href="#" style="color: #94a3b8; text-decoration: underline;">Contacto</a>
+    </div>
+  </div>
+</div>
+`;
 
   try {
     MailApp.sendEmail({
