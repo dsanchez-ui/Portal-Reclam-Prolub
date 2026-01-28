@@ -80,25 +80,25 @@ export const ClientReportTemplate: React.FC<ReportProps> = ({ claim }) => {
                 {claim.affectedItems && claim.affectedItems.length > 0 ? (
                     <table className="w-full text-left border-collapse table-fixed">
                         <thead>
-                            <tr className="bg-slate-200 text-[9px] text-black font-bold">
-                                <th className="p-1 border-r border-black border-b border-black w-1/2">Producto / Referencia</th>
-                                <th className="p-1 border-r border-black border-b border-black w-1/4">Lote</th>
-                                <th className="p-1 border-b border-black w-1/4">Cantidad</th>
+                            <tr className="bg-slate-200 text-[10px] text-black font-bold">
+                                <th className="p-3 border-r border-black border-b border-black w-1/2">Producto / Referencia</th>
+                                <th className="p-3 border-r border-black border-b border-black w-1/4">Lote</th>
+                                <th className="p-3 border-b border-black w-1/4">Cantidad</th>
                             </tr>
                         </thead>
                         <tbody>
                             {claim.affectedItems.map((item, idx) => (
                                 <tr key={idx} className="border-b border-slate-200 last:border-0">
-                                    <td className="p-1 border-r border-black border-b border-black text-black text-[9px] break-words whitespace-normal align-top">{item.productRef}</td>
-                                    <td className="p-1 border-r border-black border-b border-black text-black text-[9px] break-words whitespace-normal align-top">{item.batch}</td>
-                                    <td className="p-1 border-b border-black text-black text-[9px] break-words whitespace-normal align-top">{item.quantity}</td>
+                                    <td className="p-3 border-r border-black border-b border-black text-black text-[10px] break-words whitespace-normal align-top leading-normal">{item.productRef}</td>
+                                    <td className="p-3 border-r border-black border-b border-black text-black text-[10px] break-words whitespace-normal align-top leading-normal">{item.batch}</td>
+                                    <td className="p-3 border-b border-black text-black text-[10px] break-words whitespace-normal align-top leading-normal">{item.quantity}</td>
                                 </tr>
                             ))}
                         </tbody>
                     </table>
                 ) : (
-                    <div className="p-2 text-[9px] text-black">
-                        <p className="mb-1"><span className="font-bold">Ref:</span> {claim.productRef}</p>
+                    <div className="p-4 text-[10px] text-black">
+                        <p className="mb-2"><span className="font-bold">Ref:</span> {claim.productRef}</p>
                         <p><span className="font-bold">Lote:</span> {claim.batch}</p>
                     </div>
                 )}
@@ -108,7 +108,7 @@ export const ClientReportTemplate: React.FC<ReportProps> = ({ claim }) => {
           {/* 3. DESCRIPCIÓN */}
           <div className="mb-4 border border-black">
             <div className="bg-orange-200 font-bold p-1 border-b border-black text-center uppercase text-[10px] text-black">3. Descripción del Reclamo (Suministrado por el cliente)</div>
-            <div className="p-2 italic text-justify leading-relaxed min-h-[3rem] text-black text-[10px]">
+            <div className="p-4 italic text-justify leading-relaxed min-h-[3rem] text-black text-[10px]">
                 "{claim.description}"
             </div>
           </div>
@@ -116,16 +116,16 @@ export const ClientReportTemplate: React.FC<ReportProps> = ({ claim }) => {
           {/* 4. PLAN DE ACCIÓN */}
           <div className="mb-4 border border-black flex-1">
             <div className="bg-orange-200 font-bold p-1 border-b border-black text-center uppercase text-[10px] text-black">4. Plan de Acción y Solución</div>
-            <div className="p-2 space-y-2">
+            <div className="p-4 space-y-4">
                 <div>
-                    <strong className="block mb-1 underline uppercase text-[10px] text-black">Acción(es) Inmediata(s) Tomada(s):</strong>
+                    <strong className="block mb-6 underline uppercase text-[11px] text-black">Acción(es) Inmediata(s) Tomada(s):</strong>
                     {claim.mitigationActions && claim.mitigationActions.length > 0 ? (
                         claim.mitigationActions.map((action, idx) => (
-                            <div key={idx} className="mb-2 pl-2">
-                                <p className="text-[10px] mb-0.5 text-black font-medium">{idx + 1}. {action.description}</p>
+                            <div key={idx} className="mb-8 pl-2 border-b border-slate-100 last:border-0 pb-6">
+                                <p className="text-[11px] mb-4 text-black font-medium leading-relaxed block">{idx + 1}. {action.description}</p>
                                 {action.executionNotes && (
-                                    <div className="text-[9px] text-slate-600 bg-slate-50 p-1 rounded italic">
-                                        Nota: {action.executionNotes}
+                                    <div className="mt-4 text-[10px] text-slate-700 bg-slate-50 p-4 rounded italic border border-slate-200">
+                                        <strong>Nota:</strong> {action.executionNotes}
                                     </div>
                                 )}
                             </div>
@@ -160,11 +160,11 @@ export const ClientReportTemplate: React.FC<ReportProps> = ({ claim }) => {
           <div className="mb-2 border border-black flex-1">
             <div className="bg-slate-200 font-bold p-1 border-b border-black text-center uppercase text-[10px] text-black">5. Evidencias y Documentación</div>
             
-            <div className="p-4">
-                <div className="mb-6">
+            <div className="p-6">
+                <div className="mb-8">
                     <p className="text-[10px] font-bold text-black mb-3 underline">Archivos Adjuntos al Caso:</p>
                     {clientVisibleFiles.length > 0 ? (
-                        <ul className="list-disc pl-5 space-y-1">
+                        <ul className="list-disc pl-5 space-y-2">
                             {clientVisibleFiles.map((file, idx) => (
                                 <li key={idx} className="text-[10px] text-slate-700 break-all">
                                     {file.name}
@@ -176,14 +176,14 @@ export const ClientReportTemplate: React.FC<ReportProps> = ({ claim }) => {
                     )}
                 </div>
 
-                <div className="pt-4 border-t border-slate-300">
-                    <p className="font-bold text-xs text-black mb-2">Enlace de Acceso a Carpeta Drive:</p>
+                <div className="pt-6 border-t border-slate-300">
+                    <p className="font-bold text-sm text-black mb-3">Enlace de Acceso a Carpeta Drive:</p>
                     {clientDriveLink ? (
-                        <p className="text-xs text-slate-700 break-all select-all">
+                        <p className="text-lg font-bold text-slate-700 break-all select-all leading-normal">
                             {clientDriveLink}
                         </p>
                     ) : (
-                        <p className="text-xs text-slate-400 italic">Enlace no disponible</p>
+                        <p className="text-lg text-slate-400 italic">Enlace no disponible</p>
                     )}
                 </div>
             </div>

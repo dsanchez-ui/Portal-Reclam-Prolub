@@ -90,11 +90,11 @@ export interface Claim {
   description: string;
   
   // Immediate Mitigation (Client SLA - 5 Days)
-  // UPDATED: Now supports multiple independent actions
   mitigationActions?: MitigationAction[];
   
-  // Legacy fields kept for temporary compatibility/display logic, but source of truth is mitigationActions
+  // Legacy fields kept for temporary compatibility/display logic
   immediateSolutionStatus?: 'Pending' | 'Approved' | 'Rejected'; 
+  mitigationPhaseClosed?: boolean; // NEW: Tracks if the client email has been sent
 
   status: ClaimStatus;
   
@@ -132,3 +132,8 @@ export enum InternalRole {
   BILLING = 'Facturación',
   SUPPLY = 'Abastecimiento'
 }
+
+// UI Types Shared across Lab Components
+export type SortOption = 'DATE_DESC' | 'DATE_ASC' | 'ALPHA' | 'STATUS_PENDING' | 'STATUS_CLOSED';
+export type AuditFilterType = 'APPROVAL_READY' | 'PENDING_EXECUTION' | 'ACTION_PLAN_PENDING' | 'CLOSURE_READY' | 'HISTORY';
+export type ConfirmationType = 'DELETE_TASK' | 'DELETE_MITIGATION' | 'DELETE_CLAIM' | 'APPROVE_PLAN' | 'CLOSE_CASE_DEFINITIVE' | 'ARCHIVE_CLAIM' | null;

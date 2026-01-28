@@ -5,14 +5,15 @@ import { LabDashboard } from './components/LabDashboard';
 import { CommercialDashboard } from './components/CommercialDashboard';
 import { AppView, Claim, ClaimStatus, Brand, IncidentType } from './types';
 import { saveClaimToSheet, updateClaimInSheet, getClaimsFromSheet, deleteClaimFromSheet, sendClaimNotification } from './services/sheetsService';
+import { SECURITY_PINS } from './constants';
 import { 
   Briefcase, 
   FlaskConical, 
   Lightbulb, 
-  ChevronRight,
+  ChevronRight, 
   ArrowLeft,
   ArrowRight,
-  CheckCircle2,
+  CheckCircle2, 
   Lock,
   X,
   RefreshCw,
@@ -279,7 +280,7 @@ export default function App() {
   };
 
   const handleInternalAuthSubmit = () => {
-    if (internalPin === '2026') {
+    if (internalPin === SECURITY_PINS.GENERAL_ACCESS) {
       setShowInternalAuth(false);
       setInternalPin('');
       setInternalPinError(false);
@@ -361,6 +362,21 @@ export default function App() {
       </div>
       <style>{`@keyframes float { 0% { transform: translate(0px, 0px) scale(1); } 33% { transform: translate(10px, -20px) scale(1.05); } 66% { transform: translate(-10px, 10px) scale(0.95); } 100% { transform: translate(0px, 0px) scale(1); } } .animate-float-slow { animation: float 25s ease-in-out infinite; } .animate-float-medium { animation: float 20s ease-in-out infinite reverse; }`}</style>
       
+      {/* GLOBAL REFRESH BUTTON */}
+      <button
+        onClick={() => loadClaims()}
+        disabled={isLoading}
+        className={`fixed top-24 right-4 z-[9999] p-3 rounded-full shadow-xl border border-white/50 backdrop-blur-md transition-all duration-300 group
+          ${isLoading ? 'bg-indigo-50 cursor-wait' : 'bg-white/80 hover:bg-white hover:scale-110 cursor-pointer'}
+        `}
+        title="Sincronizar datos con la nube"
+      >
+         <RefreshCw 
+           size={20} 
+           className={`text-indigo-600 ${isLoading ? 'animate-spin' : 'group-hover:rotate-180 transition-transform duration-700'}`} 
+         />
+      </button>
+
       {/* NOTIFICATIONS */}
       {notification && notification.visible && (<div className="fixed top-6 left-1/2 transform -translate-x-1/2 z-[200] animate-bounce-in px-4 w-full max-w-md"><div className="bg-green-600 text-white px-6 py-5 rounded-2xl shadow-2xl flex items-center gap-4 border border-green-500/50 backdrop-blur-sm"><div className="bg-white/20 p-3 rounded-full flex-shrink-0"><CheckCircle2 size={32} className="text-white" strokeWidth={3} /></div><div className="flex-1"><h4 className="font-bold text-xl leading-none mb-1">{notification.message}</h4>{notification.subMessage && (<p className="text-green-100 text-sm leading-tight opacity-90">{notification.subMessage}</p>)}</div></div></div>)}
       

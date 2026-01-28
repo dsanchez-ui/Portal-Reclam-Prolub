@@ -1,4 +1,10 @@
 
+export const SECURITY_PINS = {
+  GENERAL_ACCESS: '2026',
+  LAB_ROLE: '2026',
+  AUDIT_ROLE: '2026'
+};
+
 export const REPORTERS_LIST = [
   { name: "Abastecimiento Prolub", email: "abastecimiento1@gulfcolombia.com" },
   { name: "Aceites Usados", email: "aceitesusados@gulfcolombia.com" },

@@ -71,6 +71,71 @@ export const sendClaimNotification = async (claim: any) => {
   }
 };
 
+// Deprecated in favor of generic sendAssignmentAlert but kept for compatibility
+export const sendMitigationAlert = async (claim: any, mitigation: any) => {
+  return sendAssignmentAlert(claim, mitigation, 'MITIGATION');
+};
+
+export const AREA_EMAILS: Record<string, string> = {
+  'Logística': 'logistica@gulfcolombia.com',
+  'Abastecimiento': 'liderabastecimiento@prolub.com.co',
+  'Mantenimiento': 'mantenimiento@prolub.com.co',
+  'Producción': 'amoyano@gulfcolombia.com',
+  'Facturación': 'facturacion@prolub.com.co',
+  // Mapping both role names to be safe
+  'Calidad': 'liderlaboratorio@gulfcolombia.com', 
+  'Calidad (Apoyo)': 'liderlaboratorio@gulfcolombia.com',
+  'Laboratorio': 'liderlaboratorio@gulfcolombia.com'
+};
+
+export const sendAssignmentAlert = async (claim: any, item: any, type: 'MITIGATION' | 'TASK') => {
+  try {
+    const targetEmail = AREA_EMAILS[item.assignedTo];
+    
+    if (!targetEmail) {
+        console.warn(`No email mapped for area: ${item.assignedTo}`);
+        return false;
+    }
+
+    await fetch(GOOGLE_SCRIPT_URL, {
+      method: 'POST',
+      mode: 'cors',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ 
+        action: 'send_assignment_alert', 
+        claimData: claim,
+        itemData: item,
+        targetEmail: targetEmail,
+        itemType: type
+      })
+    });
+    return true;
+  } catch (error) {
+    console.error("Error sending assignment alert:", error);
+    return false;
+  }
+};
+
+export const finalizeClaimResponse = async (claim: any, pdfBase64: string, recipientEmails: string[]) => {
+    try {
+        await fetch(GOOGLE_SCRIPT_URL, {
+            method: 'POST',
+            mode: 'cors',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ 
+                action: 'finalize_response', 
+                claimData: claim,
+                pdfBase64: pdfBase64,
+                recipientEmails: recipientEmails
+            })
+        });
+        return true;
+    } catch (error) { 
+        console.error("Error finalizing response:", error);
+        return false;
+    }
+};
+
 export const updateClaimInSheet = async (claim: any, rawFiles: File[] = []): Promise<{success: boolean, error?: string}> => {
   try {
     const processedRawFiles = [];
@@ -179,7 +244,7 @@ export const deleteMitigationFromSheet = async (mitigationId: string) => {
     } catch (error) { console.error("Error deleting mitigation:", error); }
 };
 
-export const uploadPdfToDrive = async (claimId: string, fileName: string, base64Data: string, reportType: 'CLIENT' | 'FINAL') => {
+export const uploadPdfToDrive = async (claimId: string, fileName: string, base64Data: string, reportType: 'CLIENT' | 'FINAL', folderUrl?: string) => {
     try {
         await fetch(GOOGLE_SCRIPT_URL, {
             method: 'POST',
@@ -190,7 +255,8 @@ export const uploadPdfToDrive = async (claimId: string, fileName: string, base64
                 claimId: claimId,
                 fileName: fileName,
                 base64: base64Data,
-                reportType: reportType
+                reportType: reportType,
+                folderUrl: folderUrl
             })
         });
         return true;
