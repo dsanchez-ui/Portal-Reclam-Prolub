@@ -85,8 +85,19 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
 
   // MEMOIZED FILTERING
   const filteredClaims = useMemo(() => {
+    const isAdmin = currentRole === InternalRole.LAB || currentRole === InternalRole.AUDIT;
+
     let result = claims.filter(c => {
         if (c.archived) return false;
+        
+        // 1. ROLE BASED VISIBILITY FILTER
+        if (!isAdmin) {
+            const hasMyMitigation = c.mitigationActions?.some(m => m.assignedTo === currentRole);
+            const hasMyTask = c.tasks?.some(t => t.assignedTo === currentRole);
+            if (!hasMyMitigation && !hasMyTask) return false;
+        }
+
+        // 2. SEARCH FILTER
         const term = searchTerm.toLowerCase();
         return (c.client.toLowerCase().includes(term) || c.id.toLowerCase().includes(term));
     });
@@ -368,6 +379,13 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
 
   const isAdmin = currentRole === InternalRole.LAB || currentRole === InternalRole.AUDIT;
 
+  // VISIBILITY FILTER: For non-admins, filter the visible tasks and mitigations within the selected claim
+  const viewableClaim = (selectedClaim && !isAdmin) ? {
+      ...selectedClaim,
+      mitigationActions: selectedClaim.mitigationActions?.filter(m => m.assignedTo === currentRole),
+      tasks: selectedClaim.tasks?.filter(t => t.assignedTo === currentRole)
+  } : selectedClaim;
+
   return (
     <div className={`h-screen bg-slate-50 flex flex-col font-sans relative ${isProcessingAction ? 'cursor-wait' : ''}`}>
        {showSLAAlert && <SLAAlert cases={overdueCases} onClose={() => setShowSLAAlert(false)} />}
@@ -380,7 +398,7 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
           <ClaimsSidebar claims={filteredClaims} selectedClaimId={selectedClaim?.id} onSelectClaim={setSelectedClaim} currentRole={currentRole} auditFilter={auditFilter} setAuditFilter={setAuditFilter} onViewIndicators={() => setViewMode('INDICATORS')} isHiddenMobile={!!selectedClaim} />
 
           <main className={`flex-1 overflow-y-auto bg-slate-50/50 p-6 ${selectedClaim ? 'block' : 'hidden md:flex md:items-center md:justify-center'}`}>
-             {selectedClaim ? (
+             {viewableClaim && selectedClaim ? (
                 <div className="max-w-4xl mx-auto space-y-6">
                    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                        <ClaimHeader claim={selectedClaim} isAdmin={isAdmin} currentRole={currentRole} onDelete={() => openConfirmModal('DELETE_CLAIM')} onArchive={() => openConfirmModal('ARCHIVE_CLAIM')} onCloseCase={handleInitiateClosure} onPreviewReport={setReportMode} />
@@ -388,7 +406,7 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                    </div>
 
                    <MitigationSection 
-                        claim={selectedClaim} 
+                        claim={viewableClaim} 
                         isAdmin={isAdmin} 
                         currentRole={currentRole} 
                         onAddMitigation={handleAddMitigation} 
@@ -399,7 +417,7 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                         onFinalizeResponse={handleManualFinalizeResponse}
                    />
                    <IshikawaSection claim={selectedClaim} isAdmin={isAdmin} currentRole={currentRole} onSaveIshikawa={handleSaveIshikawa} />
-                   <ActionPlanSection claim={selectedClaim} isAdmin={isAdmin} currentRole={currentRole} onSaveTask={handleSaveTask} onExecuteTask={handleExecuteTask} onDeleteTask={(id) => openConfirmModal('DELETE_TASK', id)} onApprovePlan={() => openConfirmModal('APPROVE_PLAN')} onViewEvidence={handleViewEvidence} />
+                   <ActionPlanSection claim={viewableClaim} isAdmin={isAdmin} currentRole={currentRole} onSaveTask={handleSaveTask} onExecuteTask={handleExecuteTask} onDeleteTask={(id) => openConfirmModal('DELETE_TASK', id)} onApprovePlan={() => openConfirmModal('APPROVE_PLAN')} onViewEvidence={handleViewEvidence} />
                 </div>
              ) : (
                 <div className="text-center text-slate-400 py-20"><Filter size={48} className="mx-auto mb-4 opacity-50"/><p>Seleccione un caso</p></div>

@@ -199,6 +199,12 @@ export const CommercialWizard: React.FC<CommercialWizardProps> = ({ onSubmit, on
     }, uploadedFiles);
   };
 
+  // Helper to determine dropdown value when 'Otro' is involved
+  const getCorrectionSelectValue = () => {
+      if (formData.correctionType.startsWith('Otro')) return 'Otro';
+      return formData.correctionType;
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row font-sans">
       
@@ -362,14 +368,42 @@ export const CommercialWizard: React.FC<CommercialWizardProps> = ({ onSubmit, on
                         <h3 className="text-lg font-black text-slate-800 border-b border-slate-100 pb-2">Detalles del Caso</h3>
                         <div>
                             <label className="text-xs font-bold text-slate-600 uppercase mb-1 block">Solución Esperada</label>
-                            <select className="w-full p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 bg-white text-slate-900" value={formData.correctionType} onChange={(e) => handleInputChange('correctionType', e.target.value)}>
+                            <select 
+                                className="w-full p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 bg-white text-slate-900" 
+                                value={getCorrectionSelectValue()} 
+                                onChange={(e) => {
+                                    const val = e.target.value;
+                                    // If 'Otro' is selected, prepare the string with a prefix.
+                                    // Otherwise, use the value directly.
+                                    if (val === 'Otro') {
+                                        handleInputChange('correctionType', 'Otro - ');
+                                    } else {
+                                        handleInputChange('correctionType', val);
+                                    }
+                                }}
+                            >
                                 <option>Pendiente revisión</option>
                                 <option>Requiere cambio mano a mano</option>
                                 <option>Nota crédito</option>
-                                <option>Cliente retiene producto</option>
                                 <option>Devolución parcial</option>
                                 <option>Otro</option>
                             </select>
+
+                            {/* Conditional input for 'Otro' */}
+                            {formData.correctionType.startsWith('Otro') && (
+                                <div className="mt-2 animate-fadeIn">
+                                    <label className="text-[10px] font-bold text-indigo-600 uppercase mb-1 block">Detalle de la Solución (Otro)</label>
+                                    <input 
+                                        type="text" 
+                                        className="w-full p-3 border border-indigo-200 bg-indigo-50/30 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 text-sm text-slate-800"
+                                        placeholder="Especifique el propósito (Ej: Solo para seguimiento)..."
+                                        // Extract the description part after 'Otro - '
+                                        value={formData.correctionType.replace('Otro - ', '').replace('Otro', '')}
+                                        onChange={(e) => handleInputChange('correctionType', `Otro - ${e.target.value}`)}
+                                        autoFocus
+                                    />
+                                </div>
+                            )}
                         </div>
                         <div>
                             <div className="flex justify-between items-center mb-1">
