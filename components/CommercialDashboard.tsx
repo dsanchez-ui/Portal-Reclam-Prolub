@@ -1,5 +1,4 @@
 
-
 import React, { useState, useMemo } from 'react';
 import { 
   Search, 
@@ -22,14 +21,15 @@ import {
   ArrowUp01,
   Filter,
   Home,
-  FolderOpen
+  FolderOpen,
+  Target
 } from 'lucide-react';
 import { Claim, ClaimStatus, Brand } from '../types';
 import { SearchableSelect } from './SearchableSelect';
-import { REPORTERS_LIST } from '../constants';
 
 interface CommercialDashboardProps {
   claims: Claim[];
+  integrantes: {name: string, email: string}[];
   onCreateNew: (reporterName: string) => void;
   onLogout: () => void;
   activeUser: string;
@@ -48,7 +48,8 @@ const getDaysPassed = (dateStr: string) => {
 type SortOption = 'DATE_DESC' | 'DATE_ASC' | 'ALPHA' | 'STATUS';
 
 export const CommercialDashboard: React.FC<CommercialDashboardProps> = ({ 
-  claims, 
+  claims,
+  integrantes,
   onCreateNew,
   onLogout,
   activeUser,
@@ -111,7 +112,7 @@ export const CommercialDashboard: React.FC<CommercialDashboardProps> = ({
               <SearchableSelect 
                 label="Nombre del Comercial"
                 placeholder="Busque su nombre..."
-                options={REPORTERS_LIST.map(r => r.name)}
+                options={integrantes.map(r => r.name)}
                 value={tempSelectedUser}
                 onChange={setTempSelectedUser}
                 icon={UserCircle}
@@ -148,7 +149,7 @@ export const CommercialDashboard: React.FC<CommercialDashboardProps> = ({
                     <div className="flex items-center gap-3">
                         <div>
                             <h3 className="font-bold text-slate-800 text-lg">{selectedClaim.client}</h3>
-                            <p className="text-xs text-slate-500">{selectedClaim.id} • {selectedClaim.date}</p>
+                            <p className="text-xs text-slate-500">{selectedClaim.id} • {selectedClaim.invoiceNumber} • {selectedClaim.date}</p>
                         </div>
                         {selectedClaim.driveFolderUrl && (
                             <button onClick={() => window.open(selectedClaim.driveFolderUrl, '_blank')} className="p-2 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100" title="Ver Carpeta Drive">
@@ -159,6 +160,15 @@ export const CommercialDashboard: React.FC<CommercialDashboardProps> = ({
                     <button onClick={() => setSelectedClaim(null)} className="p-2 bg-white rounded-full border border-slate-200 hover:bg-slate-100 transition"><X size={20} className="text-slate-500" /></button>
                 </div>
                 <div className="p-6 overflow-y-auto space-y-6">
+                    {/* Expected Solution in Detail Modal */}
+                    <div>
+                         <span className="text-xs font-bold text-slate-500 uppercase block mb-2">Solución Esperada</span>
+                         <div className={`p-3 rounded-lg border flex items-center gap-2 ${selectedClaim.correctionType?.includes('$') ? 'bg-green-50 border-green-200 text-green-800' : 'bg-blue-50 border-blue-200 text-blue-800'}`}>
+                            <Target size={18} />
+                            <span className="font-bold text-sm">{selectedClaim.correctionType || 'No especificada'}</span>
+                         </div>
+                    </div>
+
                     <div>
                          <span className="text-xs font-bold text-slate-800 uppercase block mb-2">Descripción del Problema</span>
                          <p className="text-sm text-slate-600 bg-white p-4 border border-slate-200 rounded-xl leading-relaxed italic">"{selectedClaim.description}"</p>
@@ -254,14 +264,24 @@ export const CommercialDashboard: React.FC<CommercialDashboardProps> = ({
                 <div className={`h-1 w-full ${claim.brand === Brand.GULF ? 'bg-orange-500' : claim.brand === Brand.VALVOLINE ? 'bg-red-600' : 'bg-slate-400'}`}></div>
                 <div className="p-5">
                   <div className="flex justify-between items-start mb-2">
-                    <h3 className="font-bold text-slate-800 text-lg leading-tight truncate pr-10">{claim.client}</h3>
-                    <span className="text-[10px] text-slate-400 font-medium flex items-center gap-1"><Calendar size={10} /> {claim.date}</span>
+                    <div>
+                        <h3 className="font-bold text-slate-800 text-lg leading-tight truncate pr-2">{claim.client}</h3>
+                        <p className="text-[10px] text-slate-400 font-bold">{claim.id} • {claim.invoiceNumber}</p>
+                    </div>
+                    <span className="text-[10px] text-slate-400 font-medium flex items-center gap-1 shrink-0"><Calendar size={10} /> {claim.date}</span>
                   </div>
                   
                   {/* Detailed Product info with Truncate + Hover */}
                   <div className="mb-3 text-xs text-slate-600 border-l-2 border-slate-200 pl-2">
                      <p className="truncate font-medium" title={claim.productRef}>{claim.productRef}</p>
                      <p className="truncate text-[10px] text-slate-400" title={claim.batch}>Lote: {claim.batch}</p>
+                  </div>
+
+                  {/* Expected Solution Badge - VISIBLE IN CARD */}
+                  <div className="mb-2">
+                      <span className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-bold uppercase ${claim.correctionType?.includes('$') ? 'bg-green-100 text-green-700 border border-green-200' : 'bg-blue-50 text-blue-700 border border-blue-200'}`}>
+                          <Target size={10} /> {claim.correctionType || 'Solución Pendiente'}
+                      </span>
                   </div>
 
                   <div className="mb-4">

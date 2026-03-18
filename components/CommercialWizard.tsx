@@ -21,13 +21,14 @@ import {
 } from 'lucide-react';
 import { enhanceClaimDescription } from '../services/geminiService';
 import { Claim, Brand, IncidentType, ClaimItem } from '../types';
-import { REPORTERS_LIST, GULF_PRODUCTS, VALVOLINE_PRODUCTS } from '../constants';
+import { GULF_PRODUCTS, VALVOLINE_PRODUCTS } from '../constants';
 import { SearchableSelect } from './SearchableSelect';
 
 interface CommercialWizardProps {
   onSubmit: (claim: Omit<Claim, 'id' | 'status' | 'date'>, files: File[]) => void;
   onCancel: () => void;
   defaultReporterName?: string;
+  integrantes: {name: string, email: string}[];
 }
 
 const STEPS = [
@@ -37,7 +38,7 @@ const STEPS = [
   { id: 4, title: 'Evidencia', icon: Upload },
 ];
 
-export const CommercialWizard: React.FC<CommercialWizardProps> = ({ onSubmit, onCancel, defaultReporterName }) => {
+export const CommercialWizard: React.FC<CommercialWizardProps> = ({ onSubmit, onCancel, defaultReporterName, integrantes }) => {
   const [currentStep, setCurrentStep] = useState(1);
   const [isEnhancing, setIsEnhancing] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
@@ -64,7 +65,7 @@ export const CommercialWizard: React.FC<CommercialWizardProps> = ({ onSubmit, on
 
   useEffect(() => {
     if (defaultReporterName) {
-        const selectedReporter = REPORTERS_LIST.find(r => r.name === defaultReporterName);
+        const selectedReporter = integrantes.find(r => r.name === defaultReporterName);
         if (selectedReporter) {
             setFormData(prev => ({
                 ...prev,
@@ -72,7 +73,7 @@ export const CommercialWizard: React.FC<CommercialWizardProps> = ({ onSubmit, on
             }));
         }
     }
-  }, [defaultReporterName]);
+  }, [defaultReporterName, integrantes]);
 
   const handleInputChange = (field: string, value: any) => {
     setFormData(prev => {
@@ -86,7 +87,7 @@ export const CommercialWizard: React.FC<CommercialWizardProps> = ({ onSubmit, on
   };
 
   const handleReporterChange = (name: string) => {
-    const selectedReporter = REPORTERS_LIST.find(r => r.name === name);
+    const selectedReporter = integrantes.find(r => r.name === name);
     setFormData(prev => ({
       ...prev,
       reporterName: name,
@@ -199,9 +200,10 @@ export const CommercialWizard: React.FC<CommercialWizardProps> = ({ onSubmit, on
     }, uploadedFiles);
   };
 
-  // Helper to determine dropdown value when 'Otro' is involved
+  // Helper to determine dropdown value when 'Otro' or 'Nota crédito' is involved
   const getCorrectionSelectValue = () => {
       if (formData.correctionType.startsWith('Otro')) return 'Otro';
+      if (formData.correctionType.startsWith('Nota crédito')) return 'Nota crédito';
       return formData.correctionType;
   };
 
@@ -296,7 +298,7 @@ export const CommercialWizard: React.FC<CommercialWizardProps> = ({ onSubmit, on
                 {currentStep === 1 && (
                     <div className="space-y-6 animate-fadeIn">
                         <h3 className="text-lg font-black text-slate-800 border-b border-slate-100 pb-2">Información del Cliente</h3>
-                        <SearchableSelect label="Quién Reporta" options={REPORTERS_LIST.map(r => r.name)} value={formData.reporterName} onChange={handleReporterChange} icon={User} />
+                        <SearchableSelect label="Quién Reporta" options={integrantes.map(r => r.name)} value={formData.reporterName} onChange={handleReporterChange} icon={User} />
                         <div className="grid grid-cols-2 gap-4">
                             <div>
                                 <label className="text-xs font-bold text-slate-600 uppercase mb-1 block">Cliente / Razón Social</label>
@@ -373,10 +375,11 @@ export const CommercialWizard: React.FC<CommercialWizardProps> = ({ onSubmit, on
                                 value={getCorrectionSelectValue()} 
                                 onChange={(e) => {
                                     const val = e.target.value;
-                                    // If 'Otro' is selected, prepare the string with a prefix.
-                                    // Otherwise, use the value directly.
+                                    // Handle special cases with input prefixes
                                     if (val === 'Otro') {
                                         handleInputChange('correctionType', 'Otro - ');
+                                    } else if (val === 'Nota crédito') {
+                                        handleInputChange('correctionType', 'Nota crédito - $ ');
                                     } else {
                                         handleInputChange('correctionType', val);
                                     }
@@ -402,6 +405,33 @@ export const CommercialWizard: React.FC<CommercialWizardProps> = ({ onSubmit, on
                                         onChange={(e) => handleInputChange('correctionType', `Otro - ${e.target.value}`)}
                                         autoFocus
                                     />
+                                </div>
+                            )}
+
+                             {/* Conditional input for 'Nota crédito' */}
+                             {formData.correctionType.startsWith('Nota crédito') && (
+                                <div className="mt-2 animate-fadeIn">
+                                    <label className="text-[10px] font-bold text-green-600 uppercase mb-1 block">Valor a acreditar</label>
+                                    <div className="relative">
+                                        <div className="absolute left-3 top-3 text-green-600">
+                                            <DollarSign size={16} />
+                                        </div>
+                                        <input 
+                                            type="text" 
+                                            className="w-full p-3 pl-10 border border-green-200 bg-green-50/30 rounded-lg outline-none focus:ring-2 focus:ring-green-500 text-sm text-slate-800 font-mono"
+                                            placeholder="0"
+                                            // Extract the value part after 'Nota crédito - $ '
+                                            value={formData.correctionType.replace('Nota crédito - $ ', '')}
+                                            onChange={(e) => {
+                                                // Remove non-numeric chars
+                                                const rawValue = e.target.value.replace(/\D/g, '');
+                                                // Format number
+                                                const formatted = rawValue ? parseInt(rawValue).toLocaleString('es-CO') : '';
+                                                handleInputChange('correctionType', `Nota crédito - $ ${formatted}`);
+                                            }}
+                                            autoFocus
+                                        />
+                                    </div>
                                 </div>
                             )}
                         </div>

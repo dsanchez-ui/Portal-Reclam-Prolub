@@ -145,6 +145,7 @@ const ImprovementWizard = ({ onBack, onSubmit }: { onBack: () => void, onSubmit:
 export default function App() {
   const [currentView, setCurrentView] = useState<AppView>(AppView.LANDING);
   const [claims, setClaims] = useState<Claim[]>([]);
+  const [integrantes, setIntegrantes] = useState<{name: string, email: string}[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   
   const [activeCommercialUser, setActiveCommercialUser] = useState<string>('');
@@ -163,7 +164,8 @@ export default function App() {
         if (!isLoading) {
             console.log("Polling updates...");
             getClaimsFromSheet().then(data => {
-                if(data && data.length > 0) setClaims(data);
+                if(data && data.claims && data.claims.length > 0) setClaims(data.claims);
+                if(data && data.integrantes && data.integrantes.length > 0) setIntegrantes(data.integrantes);
             }).catch(e => console.error("Polling failed", e));
         }
     }, 30000);
@@ -175,10 +177,12 @@ export default function App() {
     setIsLoading(true);
     try {
       const data = await getClaimsFromSheet();
-      setClaims(data || []);
+      setClaims(data.claims || []);
+      setIntegrantes(data.integrantes || []);
     } catch (error) {
       console.error("Failed to load claims, showing empty state.", error);
       setClaims([]);
+      setIntegrantes([]);
     }
     setIsLoading(false);
   };
@@ -309,7 +313,7 @@ export default function App() {
             <div className="text-center mb-16 max-w-4xl mx-auto animate-fadeIn flex flex-col items-center">
                <div className="mb-10 transform hover:scale-105 transition duration-500">
                  <img 
-                   src="https://i.ibb.co/0RTvYnq6/Logo-Prolub-principal-3.png" 
+                   src="https://drive.google.com/thumbnail?id=18VsOvi3qnV_Wh1xK97WMqpZslWwPvgya&sz=w1000" 
                    alt="Prolub Logo" 
                    className="h-24 md:h-32 object-contain drop-shadow-xl" 
                  />
@@ -346,8 +350,8 @@ export default function App() {
       );
     }
 
-    if (currentView === AppView.COMMERCIAL_DASHBOARD) return <CommercialDashboard claims={claims} onCreateNew={handleCreateNewClaim} onLogout={handleCommercialLogout} activeUser={activeCommercialUser} onUserChange={setActiveCommercialUser} />;
-    if (currentView === AppView.COMMERCIAL_WIZARD) return <CommercialWizard onSubmit={handleCommercialSubmit} onCancel={() => setCurrentView(AppView.COMMERCIAL_DASHBOARD)} defaultReporterName={activeCommercialUser} />;
+    if (currentView === AppView.COMMERCIAL_DASHBOARD) return <CommercialDashboard claims={claims} integrantes={integrantes} onCreateNew={handleCreateNewClaim} onLogout={handleCommercialLogout} activeUser={activeCommercialUser} onUserChange={setActiveCommercialUser} />;
+    if (currentView === AppView.COMMERCIAL_WIZARD) return <CommercialWizard onSubmit={handleCommercialSubmit} onCancel={() => setCurrentView(AppView.COMMERCIAL_DASHBOARD)} defaultReporterName={activeCommercialUser} integrantes={integrantes} />;
     if (currentView === AppView.LAB_DASHBOARD) return <LabDashboard claims={claims} onUpdateClaim={handleLabUpdate} onDeleteClaim={handleDeleteClaim} onLogout={() => setCurrentView(AppView.LANDING)} onRefresh={loadClaims} />;
     if (currentView === AppView.IMPROVEMENT) return <ImprovementWizard onBack={() => setCurrentView(AppView.LANDING)} onSubmit={handleImprovementSubmit} />;
     return <div>Error: Vista desconocida</div>;

@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { 
   FlaskConical, Wrench, Factory, Truck, Receipt, Container, ClipboardCheck, ShieldCheck, 
-  LogOut, Search, ArrowDownUp, Users, Zap, Clock, ClipboardList, Lock, History, BarChart3, X 
+  LogOut, Search, ArrowDownUp, Users, Zap, Clock, ClipboardList, Lock, History, BarChart3, X, Target 
 } from 'lucide-react';
 import { InternalRole, Claim, ClaimStatus, AuditFilterType, SortOption } from '../../types';
 import { SECURITY_PINS } from '../../constants';
@@ -211,9 +211,16 @@ export const ClaimsSidebar: React.FC<ClaimsSidebarProps> = ({
                             <span className="font-bold text-sm text-slate-800 truncate flex-1">{claim.client}</span>
                             <span className={`text-[10px] px-2 py-0.5 rounded-full border ${claim.status === ClaimStatus.CLOSED ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>{claim.status}</span>
                         </div>
+                        
+                        {/* New Line for Expected Solution in Sidebar */}
+                        <div className="flex items-center gap-1.5 mb-1 text-[10px] font-bold text-slate-600 bg-slate-50 px-2 py-1 rounded w-fit max-w-full">
+                            <Target size={10} className="text-indigo-500 shrink-0"/> 
+                            <span className="truncate">{claim.correctionType || 'Solución Pendiente'}</span>
+                        </div>
+
                         <p className="text-xs text-slate-500 mb-2 line-clamp-2 italic">"{claim.description}"</p>
                         <div className="flex justify-between text-[10px] text-slate-400 items-center">
-                            <span>{claim.id}</span>
+                            <span>{claim.id} • {claim.invoiceNumber}</span>
                             {claim.mitigationActions?.some(m => m.executionNotes && m.status === 'Pending') && <span className="flex items-center gap-1 text-orange-500 font-bold"><Clock size={10} /> Por Aprobar</span>}
                         </div>
                     </div>

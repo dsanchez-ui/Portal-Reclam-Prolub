@@ -1,15 +1,15 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Filter } from 'lucide-react';
+import { Filter, MessageSquare, Edit3 } from 'lucide-react';
 import { Claim, ClaimStatus, InternalRole, IshikawaEntry, Task, EvidenceFile, MitigationAction, SortOption, AuditFilterType, ConfirmationType } from '../types';
-import { uploadPdfToDrive, closeClaimSimple, archiveClaimInSheet, sendAssignmentAlert, finalizeClaimResponse, AREA_EMAILS } from '../services/sheetsService';
+import { uploadPdfToDrive, closeClaimSimple, archiveClaimInSheet, sendAssignmentAlert, finalizeClaimResponse, AREA_EMAILS, sendAuditAlert, sendChangeRequest, resolveChangeRequest } from '../services/sheetsService';
 
 // SUBCOMPONENTS
 import { RoleSelector, LabHeader, ClaimsSidebar } from './lab/Navigation';
 import { IndicatorsView } from './lab/IndicatorsView';
-import { ClaimHeader, ClaimInfo } from './lab/ClaimDetail';
+import { ClaimHeader, ClaimInfo, ChangeRequestHistory } from './lab/ClaimDetail';
 import { MitigationSection, IshikawaSection, ActionPlanSection } from './lab/LabSections';
-import { SLAAlert, ConfirmModal, ReportPreviewModal } from './lab/Modals';
+import { SLAAlert, ConfirmModal, ReportPreviewModal, InputModal } from './lab/Modals';
 
 interface LabDashboardProps {
   claims: Claim[];
@@ -35,6 +35,13 @@ const getDaysPassed = (dateStr: string) => {
     return Math.floor(diff / (1000 * 60 * 60 * 24));
 };
 
+// Helper to check assignment compatibility (e.g. Quality Aux can see Quality tasks)
+const isAssignedToUser = (assignedTo: string, currentRole: InternalRole) => {
+    if (assignedTo === currentRole) return true;
+    if (currentRole === InternalRole.QUALITY_AUX && assignedTo === 'Calidad') return true;
+    return false;
+};
+
 export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClaim, onDeleteClaim, onLogout, onRefresh }) => {
   // STATE
   const [currentRole, setCurrentRole] = useState<InternalRole | null>(null);
@@ -53,6 +60,15 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
   // Updated type to include FINAL_CLOSURE
   const [reportMode, setReportMode] = useState<'CLIENT' | 'FINAL' | 'CLIENT_SEND' | 'FINAL_CLOSURE' | null>(null);
   const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean, type: ConfirmationType, itemId: string | null }>({ isOpen: false, type: null, itemId: null });
+  
+  // NEW: Input Modal State for Change Requests / Editing Descriptions
+  const [inputModal, setInputModal] = useState<{
+      isOpen: boolean;
+      mode: 'CHANGE_REQUEST' | 'EDIT_DESCRIPTION';
+      itemId: string;
+      itemType: 'MITIGATION' | 'TASK' | 'ISHIKAWA';
+      currentValue?: string;
+  }>({ isOpen: false, mode: 'CHANGE_REQUEST', itemId: '', itemType: 'MITIGATION' });
 
   // EFFECTS
   useEffect(() => { setHasCheckedSLA(false); setShowSLAAlert(false); }, [currentRole]);
@@ -70,8 +86,8 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
             const days = getDaysPassed(c.date);
             if (days < 25) return false;
             const roleIsAdmin = currentRole === InternalRole.LAB || currentRole === InternalRole.AUDIT;
-            const pendingMitigation = c.mitigationActions?.some(m => m.assignedTo === currentRole && m.status === 'Pending');
-            const pendingTasks = c.tasks?.some(t => t.assignedTo === currentRole && t.status === 'Pending');
+            const pendingMitigation = c.mitigationActions?.some(m => isAssignedToUser(m.assignedTo, currentRole) && m.status === 'Pending');
+            const pendingTasks = c.tasks?.some(t => isAssignedToUser(t.assignedTo, currentRole) && t.status === 'Pending');
             if (roleIsAdmin) return c.status !== ClaimStatus.CLOSED;
             return pendingMitigation || pendingTasks;
         });
@@ -92,8 +108,9 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
         
         // 1. ROLE BASED VISIBILITY FILTER
         if (!isAdmin) {
-            const hasMyMitigation = c.mitigationActions?.some(m => m.assignedTo === currentRole);
-            const hasMyTask = c.tasks?.some(t => t.assignedTo === currentRole);
+            // Updated to use helper function for flexible role matching
+            const hasMyMitigation = c.mitigationActions?.some(m => isAssignedToUser(m.assignedTo, currentRole!));
+            const hasMyTask = c.tasks?.some(t => isAssignedToUser(t.assignedTo, currentRole!));
             if (!hasMyMitigation && !hasMyTask) return false;
         }
 
@@ -167,7 +184,7 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
       alert(`Mitigación asignada a ${newAction.assignedTo}. Notificación enviada.`);
   };
 
-  const handleExecuteMitigation = (id: string, note: string, file: File | null) => {
+  const handleExecuteMitigation = async (id: string, note: string, file: File | null) => {
       if (!selectedClaim) return;
       const filesToUpload: File[] = [];
       let newEvidence: EvidenceFile[] = [];
@@ -178,10 +195,39 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
            filesToUpload.push(new File([file], newName, { type: file.type }));
            newEvidence.push({ name: newName, type: file.type, url: URL.createObjectURL(file), size: file.size });
       }
-      const updatedActions = selectedClaim.mitigationActions?.map(action => action.id === id ? { ...action, executionNotes: note, executionEvidence: newEvidence, completedAt: new Date().toISOString() } : action);
+      
+      // Keep existing evidence if no new file is uploaded? 
+      // Current logic: If new file, add it.
+      // Need to handle re-execution (appending vs replacing). The prompt says "delete evidence... load new evidence".
+      // Simplified: If file provided, it becomes the latest.
+      
+      const updatedActions = selectedClaim.mitigationActions?.map(action => {
+          if (action.id === id) {
+              const currentEvidence = action.executionEvidence || [];
+              const finalEvidence = file ? [...currentEvidence, ...newEvidence] : currentEvidence;
+              return { 
+                  ...action, 
+                  executionNotes: note, 
+                  executionEvidence: finalEvidence, 
+                  completedAt: new Date().toISOString() 
+              };
+          }
+          return action;
+      });
+
       const updated = { ...selectedClaim, mitigationActions: updatedActions };
       onUpdateClaim(updated, filesToUpload);
       setSelectedClaim(updated);
+
+      // AUTOMATED AUDIT ALERT: Check if ALL mitigations are executed (have notes) but NOT all are approved
+      if (updatedActions && updatedActions.length > 0) {
+          const allExecuted = updatedActions.every(a => a.executionNotes && a.executionNotes.trim() !== '');
+          const allApproved = updatedActions.every(a => a.status === 'Approved');
+          
+          if (allExecuted && !allApproved) {
+              await sendAuditAlert(updated, 'MITIGATION_READY');
+          }
+      }
   };
 
   const handleApproveMitigation = async (id: string) => {
@@ -208,6 +254,14 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
       setSelectedClaim(updated);
   };
 
+  const handleDeleteIshikawa = async (id: string) => {
+      if (!selectedClaim) return;
+      const updatedList = selectedClaim.ishikawaList?.filter(i => i.id !== id) || [];
+      const updated = { ...selectedClaim, ishikawaList: updatedList };
+      await onUpdateClaim(updated);
+      setSelectedClaim(updated);
+  };
+
   const handleSaveIshikawa = (category: string, observation: string) => {
       if (!selectedClaim) return;
       const newEntry: IshikawaEntry = { id: Date.now().toString(), category, observation, createdAt: new Date().toISOString() };
@@ -228,7 +282,7 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
       alert(`Tarea asignada a ${newTask.assignedTo}. Notificación enviada.`);
   };
 
-  const handleExecuteTask = (id: string, note: string, file: File | null) => {
+  const handleExecuteTask = async (id: string, note: string, file: File | null) => {
       if (!selectedClaim) return;
       const filesToUpload: File[] = [];
       let newEvidence: EvidenceFile[] = [];
@@ -239,10 +293,35 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
           filesToUpload.push(new File([file], newName, { type: file.type }));
           newEvidence.push({ name: newName, type: file.type, url: URL.createObjectURL(file), size: file.size });
       }
-      const updatedTasks = selectedClaim.tasks?.map(t => t.id === id ? { ...t, status: 'Realized' as const, executionNotes: note, executionEvidence: newEvidence, completedAt: new Date().toISOString() } : t);
+      
+      const updatedTasks = selectedClaim.tasks?.map(t => {
+          if (t.id === id) {
+              const currentEvidence = t.executionEvidence || [];
+              const finalEvidence = file ? [...currentEvidence, ...newEvidence] : currentEvidence;
+              return {
+                  ...t,
+                  status: 'Realized' as const,
+                  executionNotes: note,
+                  executionEvidence: finalEvidence,
+                  completedAt: new Date().toISOString()
+              };
+          }
+          return t;
+      });
+
       const updated = { ...selectedClaim, tasks: updatedTasks };
       onUpdateClaim(updated, filesToUpload);
       setSelectedClaim(updated);
+
+      // AUTOMATED AUDIT ALERT: Check if ALL tasks are realized but Plan is not approved
+      if (updatedTasks && updatedTasks.length > 0) {
+          const allRealized = updatedTasks.every(t => t.status === 'Realized');
+          const planApproved = selectedClaim.actionPlanStatus === 'Approved';
+          
+          if (allRealized && !planApproved) {
+              await sendAuditAlert(updated, 'PLAN_READY');
+          }
+      }
   };
 
   const handleDeleteTask = async (id: string) => {
@@ -268,6 +347,80 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
       }
       // Open the preview modal in FINAL_CLOSURE mode
       setReportMode('FINAL_CLOSURE');
+  };
+
+  // --- NEW: Request Change Handler ---
+  const handleRequestChange = (itemId: string, itemType: 'MITIGATION' | 'TASK' | 'ISHIKAWA', currentValue?: string) => {
+      if (currentRole === InternalRole.AUDIT) {
+          // Open Modal for Audit (Change Request with Email)
+          setInputModal({ isOpen: true, mode: 'CHANGE_REQUEST', itemId, itemType });
+      } else if (currentRole === InternalRole.LAB) {
+          // Open Modal for Lab (Direct Edit)
+          setInputModal({ isOpen: true, mode: 'EDIT_DESCRIPTION', itemId, itemType, currentValue });
+      }
+  };
+
+  // --- NEW: Resolve Change Request ---
+  const handleResolveChangeRequest = async (requestId: string) => {
+      if (!selectedClaim) return;
+      setIsProcessingAction(true);
+      try {
+          const success = await resolveChangeRequest(requestId);
+          if (success) {
+              await onRefresh();
+              alert("Solicitud marcada como resuelta.");
+          } else {
+              alert("Error al resolver la solicitud.");
+          }
+      } catch (e) {
+          console.error(e);
+          alert("Ocurrió un error.");
+      } finally {
+          setIsProcessingAction(false);
+      }
+  };
+
+  const handleSubmitInputModal = async (text: string) => {
+      if (!selectedClaim) return;
+      const { mode, itemId, itemType } = inputModal;
+      setIsProcessingAction(true);
+
+      try {
+          if (mode === 'CHANGE_REQUEST') {
+              // 1. Find item data to send in email
+              let itemData = null;
+              if (itemType === 'MITIGATION') itemData = selectedClaim.mitigationActions?.find(m => m.id === itemId);
+              else if (itemType === 'TASK') itemData = selectedClaim.tasks?.find(t => t.id === itemId);
+              else if (itemType === 'ISHIKAWA') itemData = selectedClaim.ishikawaList?.find(i => i.id === itemId);
+
+              if (itemData) {
+                  // 2. Send Email via Backend & Save Request
+                  const success = await sendChangeRequest(selectedClaim, itemData, text, itemType);
+                  if (success) {
+                      await onRefresh(); // Refresh to see the new request in list
+                      alert("Solicitud de cambio enviada y registrada.");
+                  }
+                  else alert("Error enviando solicitud.");
+              }
+          } else if (mode === 'EDIT_DESCRIPTION') {
+              // DIRECT EDIT (LAB)
+              let updatedClaim = { ...selectedClaim };
+              
+              if (itemType === 'MITIGATION') {
+                  updatedClaim.mitigationActions = selectedClaim.mitigationActions?.map(m => m.id === itemId ? { ...m, description: text } : m);
+              } else if (itemType === 'TASK') {
+                  updatedClaim.tasks = selectedClaim.tasks?.map(t => t.id === itemId ? { ...t, description: text } : t);
+              } // Ishikawa editing is usually deletion/re-creation, but if we want direct text edit, we'd need to map it. Ishikawa currently doesn't store 'description' but 'observation'.
+              
+              await onUpdateClaim(updatedClaim);
+          }
+      } catch (e) {
+          console.error(e);
+          alert("Ocurrió un error.");
+      } finally {
+          setIsProcessingAction(false);
+          setInputModal({ ...inputModal, isOpen: false });
+      }
   };
 
   const handleConfirmAction = async () => {
@@ -380,16 +533,30 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
   const isAdmin = currentRole === InternalRole.LAB || currentRole === InternalRole.AUDIT;
 
   // VISIBILITY FILTER: For non-admins, filter the visible tasks and mitigations within the selected claim
+  // Updated to use helper function
   const viewableClaim = (selectedClaim && !isAdmin) ? {
       ...selectedClaim,
-      mitigationActions: selectedClaim.mitigationActions?.filter(m => m.assignedTo === currentRole),
-      tasks: selectedClaim.tasks?.filter(t => t.assignedTo === currentRole)
+      mitigationActions: selectedClaim.mitigationActions?.filter(m => isAssignedToUser(m.assignedTo, currentRole!)),
+      tasks: selectedClaim.tasks?.filter(t => isAssignedToUser(t.assignedTo, currentRole!))
   } : selectedClaim;
 
   return (
     <div className={`h-screen bg-slate-50 flex flex-col font-sans relative ${isProcessingAction ? 'cursor-wait' : ''}`}>
        {showSLAAlert && <SLAAlert cases={overdueCases} onClose={() => setShowSLAAlert(false)} />}
        <ConfirmModal isOpen={confirmModal.isOpen} type={confirmModal.type} isProcessing={isProcessingAction} onConfirm={handleConfirmAction} onCancel={() => setConfirmModal({ isOpen: false, type: null, itemId: null })} />
+       <InputModal 
+            isOpen={inputModal.isOpen} 
+            title={inputModal.mode === 'CHANGE_REQUEST' ? 'Solicitar Cambio' : 'Editar Descripción'}
+            subtitle={inputModal.mode === 'CHANGE_REQUEST' ? 'Se notificará al área responsable vía correo electrónico.' : 'Modifique el texto de la tarea/mitigación.'}
+            placeholder={inputModal.mode === 'CHANGE_REQUEST' ? 'Describa qué se debe corregir...' : 'Nuevo texto...'}
+            initialValue={inputModal.mode === 'EDIT_DESCRIPTION' ? inputModal.currentValue : ''}
+            confirmText={inputModal.mode === 'CHANGE_REQUEST' ? 'Enviar Solicitud' : 'Guardar Cambios'}
+            confirmColorClass={inputModal.mode === 'CHANGE_REQUEST' ? 'bg-orange-500 hover:bg-orange-600' : 'bg-indigo-600 hover:bg-indigo-700'}
+            icon={inputModal.mode === 'CHANGE_REQUEST' ? MessageSquare : Edit3}
+            isProcessing={isProcessingAction}
+            onConfirm={handleSubmitInputModal}
+            onCancel={() => setInputModal({ ...inputModal, isOpen: false })}
+       />
        {reportMode && selectedClaim && <ReportPreviewModal claim={selectedClaim} mode={reportMode} onClose={() => setReportMode(null)} onUploadToDrive={handleUploadReport} />}
 
        <LabHeader currentRole={currentRole} onChangeRole={() => { setCurrentRole(null); setSelectedClaim(null); }} onLogout={onLogout} searchTerm={searchTerm} onSearchChange={setSearchTerm} sortOption={sortOption} onSortChange={setSortOption} />
@@ -405,6 +572,15 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                        <ClaimInfo claim={selectedClaim} onViewEvidence={handleViewEvidence} />
                    </div>
 
+                   {/* CHANGE REQUESTS HISTORY BLOCK */}
+                   {selectedClaim.changeRequests && selectedClaim.changeRequests.length > 0 && (
+                        <ChangeRequestHistory 
+                            claim={selectedClaim} 
+                            currentRole={currentRole} 
+                            onResolve={handleResolveChangeRequest} 
+                        />
+                   )}
+
                    <MitigationSection 
                         claim={viewableClaim} 
                         isAdmin={isAdmin} 
@@ -413,11 +589,29 @@ export const LabDashboard: React.FC<LabDashboardProps> = ({ claims, onUpdateClai
                         onExecuteMitigation={handleExecuteMitigation} 
                         onApproveMitigation={handleApproveMitigation} 
                         onDeleteMitigation={(id) => openConfirmModal('DELETE_MITIGATION', id)} 
+                        onRequestChange={(id, text) => handleRequestChange(id, 'MITIGATION', text)}
                         onViewEvidence={handleViewEvidence}
                         onFinalizeResponse={handleManualFinalizeResponse}
                    />
-                   <IshikawaSection claim={selectedClaim} isAdmin={isAdmin} currentRole={currentRole} onSaveIshikawa={handleSaveIshikawa} />
-                   <ActionPlanSection claim={viewableClaim} isAdmin={isAdmin} currentRole={currentRole} onSaveTask={handleSaveTask} onExecuteTask={handleExecuteTask} onDeleteTask={(id) => openConfirmModal('DELETE_TASK', id)} onApprovePlan={() => openConfirmModal('APPROVE_PLAN')} onViewEvidence={handleViewEvidence} />
+                   <IshikawaSection 
+                        claim={selectedClaim} 
+                        isAdmin={isAdmin} 
+                        currentRole={currentRole} 
+                        onSaveIshikawa={handleSaveIshikawa} 
+                        onRequestChange={(id, text) => handleRequestChange(id, 'ISHIKAWA', text)}
+                        onDeleteIshikawa={(id) => handleDeleteIshikawa(id)}
+                   />
+                   <ActionPlanSection 
+                        claim={viewableClaim} 
+                        isAdmin={isAdmin} 
+                        currentRole={currentRole} 
+                        onSaveTask={handleSaveTask} 
+                        onExecuteTask={handleExecuteTask} 
+                        onDeleteTask={(id) => openConfirmModal('DELETE_TASK', id)} 
+                        onRequestChange={(id, text) => handleRequestChange(id, 'TASK', text)}
+                        onApprovePlan={() => openConfirmModal('APPROVE_PLAN')} 
+                        onViewEvidence={handleViewEvidence} 
+                   />
                 </div>
              ) : (
                 <div className="text-center text-slate-400 py-20"><Filter size={48} className="mx-auto mb-4 opacity-50"/><p>Seleccione un caso</p></div>

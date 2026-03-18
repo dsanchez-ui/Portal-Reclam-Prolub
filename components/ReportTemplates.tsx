@@ -38,7 +38,7 @@ export const ClientReportTemplate: React.FC<ReportProps> = ({ claim }) => {
           <div className="border-2 border-black mb-4">
             <div className="flex border-b border-black">
               <div className="w-40 border-r border-black flex items-center justify-center p-2">
-                  <img src="https://i.ibb.co/0RTvYnq6/Logo-Prolub-principal-3.png" alt="Prolub" className="h-10 object-contain" crossOrigin="anonymous" />
+                  <img src="https://drive.google.com/thumbnail?id=18VsOvi3qnV_Wh1xK97WMqpZslWwPvgya&sz=w1000" alt="Prolub" className="h-10 object-contain" crossOrigin="anonymous" />
               </div>
               <div className="flex-1 flex flex-col text-center justify-center">
                   <div className="border-b border-black font-bold p-1 text-sm text-black">PROLUB S.A.</div>
@@ -74,6 +74,10 @@ export const ClientReportTemplate: React.FC<ReportProps> = ({ claim }) => {
             <div className="grid grid-cols-[100px_1fr] border-b border-black">
               <div className="bg-slate-50 p-1 border-r border-black font-bold text-black text-[10px]">Fecha Reporte:</div>
               <div className="p-1 text-black text-[10px]">{claim.date}</div>
+            </div>
+            <div className="grid grid-cols-[100px_1fr] border-b border-black">
+              <div className="bg-slate-50 p-1 border-r border-black font-bold text-black text-[10px]">Factura:</div>
+              <div className="p-1 text-black text-[10px]">{claim.invoiceNumber}</div>
             </div>
             <div className="border-b-0">
                 <div className="bg-slate-50 p-1 border-b border-black font-bold text-center text-[10px] uppercase text-black">Productos Relacionados</div>
@@ -211,7 +215,7 @@ export const FinalReportTemplate: React.FC<ReportProps> = ({ claim }) => {
         {/* PAGE 1 */}
         <div className="w-[210mm] min-h-[297mm] p-12 flex flex-col relative">
             <div className="flex justify-between items-center border-b-2 border-indigo-900 pb-4 mb-8">
-                <img src="https://i.ibb.co/0RTvYnq6/Logo-Prolub-principal-3.png" alt="Prolub" className="h-12 object-contain" crossOrigin="anonymous" />
+                <img src="https://drive.google.com/thumbnail?id=18VsOvi3qnV_Wh1xK97WMqpZslWwPvgya&sz=w1000" alt="Prolub" className="h-12 object-contain" crossOrigin="anonymous" />
                 <div className="text-right">
                     <h1 className="text-xl font-bold text-indigo-900">INFORME TÉCNICO DE CIERRE</h1>
                     <p className="font-mono text-slate-500">CASO #{claim.id}</p>

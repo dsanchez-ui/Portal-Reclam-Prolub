@@ -116,6 +116,78 @@ export const sendAssignmentAlert = async (claim: any, item: any, type: 'MITIGATI
   }
 };
 
+export const sendAuditAlert = async (claim: any, auditType: 'MITIGATION_READY' | 'PLAN_READY') => {
+    try {
+        await fetch(GOOGLE_SCRIPT_URL, {
+            method: 'POST',
+            mode: 'cors',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ 
+                action: 'send_audit_alert', 
+                claimData: claim,
+                auditType: auditType
+            })
+        });
+        return true;
+    } catch (error) {
+        console.error("Error sending audit alert:", error);
+        return false;
+    }
+};
+
+export const sendChangeRequest = async (claim: any, item: any, requestText: string, type: 'MITIGATION' | 'TASK' | 'ISHIKAWA') => {
+    try {
+        // Determine target email
+        let targetEmail = '';
+        if (type === 'ISHIKAWA') {
+            targetEmail = AREA_EMAILS['Laboratorio'];
+        } else {
+            targetEmail = AREA_EMAILS[item.assignedTo];
+        }
+
+        if (!targetEmail) {
+            console.error("Target email not found for assignment");
+            return false;
+        }
+
+        await fetch(GOOGLE_SCRIPT_URL, {
+            method: 'POST',
+            mode: 'cors',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ 
+                action: 'send_change_request', 
+                claimData: claim,
+                itemData: item,
+                targetEmail: targetEmail,
+                itemType: type,
+                requestText: requestText
+            })
+        });
+        return true;
+    } catch (error) {
+        console.error("Error sending change request:", error);
+        return false;
+    }
+};
+
+export const resolveChangeRequest = async (requestId: string) => {
+    try {
+        await fetch(GOOGLE_SCRIPT_URL, {
+            method: 'POST',
+            mode: 'cors',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ 
+                action: 'resolve_change_request', 
+                requestId: requestId
+            })
+        });
+        return true;
+    } catch (error) {
+        console.error("Error resolving change request:", error);
+        return false;
+    }
+};
+
 export const finalizeClaimResponse = async (claim: any, pdfBase64: string, recipientEmails: string[]) => {
     try {
         await fetch(GOOGLE_SCRIPT_URL, {
@@ -266,7 +338,7 @@ export const uploadPdfToDrive = async (claimId: string, fileName: string, base64
     }
 };
 
-export const getClaimsFromSheet = async (): Promise<any[]> => {
+export const getClaimsFromSheet = async (): Promise<{claims: any[], integrantes: {name: string, email: string}[]}> => {
   try {
     // Add a timestamp to bypass any caching
     const response = await fetch(`${GOOGLE_SCRIPT_URL}?t=${new Date().getTime()}`);
@@ -277,12 +349,12 @@ export const getClaimsFromSheet = async (): Promise<any[]> => {
     // Basic check for HTML error pages from Apps Script
     if (text.trim().startsWith("<!DOCTYPE")) {
         console.error("Received an HTML error page from Google Apps Script.");
-        return [];
+        return { claims: [], integrantes: [] };
     }
     const json = JSON.parse(text);
-    return json.result === 'success' ? json.data : [];
+    return json.result === 'success' ? { claims: json.data || [], integrantes: json.integrantes || [] } : { claims: [], integrantes: [] };
   } catch (error) {
     console.error("Critical error fetching claims:", error);
-    return [];
+    return { claims: [], integrantes: [] };
   }
 };

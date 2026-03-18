@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { 
-  Zap, CheckCircle2, Sparkles, Trash2, Eye, Stethoscope, Plus, ClipboardCheck, Activity, Upload, ThumbsUp, Send 
+  Zap, CheckCircle2, Sparkles, Trash2, Eye, Stethoscope, Plus, ClipboardCheck, Activity, Upload, ThumbsUp, Send, MessageSquare, Edit3 
 } from 'lucide-react';
 import { Claim, ClaimStatus, InternalRole, Task, EvidenceFile } from '../../types';
 import { enhanceIshikawaObservation, enhanceTaskInstruction, enhanceImmediateSolution } from '../../services/geminiService';
@@ -18,12 +18,13 @@ interface MitigationSectionProps extends SectionProps {
     onExecuteMitigation: (id: string, note: string, file: File | null) => void;
     onApproveMitigation: (id: string) => void;
     onDeleteMitigation: (id: string) => void;
+    onRequestChange: (id: string, currentText?: string) => void;
     onViewEvidence: (file: EvidenceFile) => void;
     onFinalizeResponse?: () => void;
 }
 
 export const MitigationSection: React.FC<MitigationSectionProps> = ({ 
-    claim, isAdmin, currentRole, onAddMitigation, onExecuteMitigation, onApproveMitigation, onDeleteMitigation, onViewEvidence, onFinalizeResponse 
+    claim, isAdmin, currentRole, onAddMitigation, onExecuteMitigation, onApproveMitigation, onDeleteMitigation, onRequestChange, onViewEvidence, onFinalizeResponse 
 }) => {
     const [input, setInput] = useState('');
     const [responsible, setResponsible] = useState('Logística');
@@ -125,14 +126,22 @@ export const MitigationSection: React.FC<MitigationSectionProps> = ({
                                         <span className={`text-xs font-bold px-2 py-0.5 rounded ${action.status === 'Approved' ? 'bg-green-200 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
                                             {action.status === 'Approved' ? 'APROBADO' : 'PENDIENTE'}
                                         </span>
+                                        
+                                        {/* EDIT / REQUEST CHANGE / DELETE BUTTONS */}
                                         {isAdmin && (
-                                            <button onClick={(e) => { e.stopPropagation(); onDeleteMitigation(action.id); }} className="ml-2 p-1.5 text-red-300 hover:text-red-600 hover:bg-red-50 rounded-full transition" title="Eliminar"><Trash2 size={14} /></button>
+                                            <>
+                                                <button onClick={(e) => { e.stopPropagation(); onRequestChange(action.id, action.description); }} className="ml-2 p-1.5 text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded-full transition" title={currentRole === InternalRole.AUDIT ? "Solicitar Cambio" : "Editar Texto"}>
+                                                    {currentRole === InternalRole.AUDIT ? <MessageSquare size={14}/> : <Edit3 size={14}/>}
+                                                </button>
+                                                <button onClick={(e) => { e.stopPropagation(); onDeleteMitigation(action.id); }} className="ml-1 p-1.5 text-red-300 hover:text-red-600 hover:bg-red-50 rounded-full transition" title="Eliminar"><Trash2 size={14} /></button>
+                                            </>
                                         )}
                                     </div>
                                 </div>
                             </div>
                             
-                            {canExecute(action.assignedTo) && action.status === 'Pending' && executingId !== action.id && (
+                            {/* Execution Panel (Always visible if responsible needs to edit) */}
+                            {canExecute(action.assignedTo) && executingId !== action.id && (
                                 <div className="mt-2">
                                     <button onClick={() => { setExecutingId(action.id); setNote(action.executionNotes || ''); }} className="bg-amber-600 text-white px-4 py-2 rounded-lg font-bold text-xs hover:bg-amber-700 transition flex items-center gap-2 shadow-lg shadow-amber-200">
                                         <CheckCircle2 size={14}/> {action.executionNotes ? "EDITAR REPORTE" : "EJECUTAR ACCIÓN"}
@@ -181,9 +190,11 @@ export const MitigationSection: React.FC<MitigationSectionProps> = ({
 // --- ISHIKAWA SECTION ---
 interface IshikawaSectionProps extends SectionProps {
     onSaveIshikawa: (category: string, observation: string) => void;
+    onRequestChange: (id: string, currentText?: string) => void;
+    onDeleteIshikawa: (id: string) => void;
 }
 
-export const IshikawaSection: React.FC<IshikawaSectionProps> = ({ claim, isAdmin, currentRole, onSaveIshikawa }) => {
+export const IshikawaSection: React.FC<IshikawaSectionProps> = ({ claim, isAdmin, currentRole, onSaveIshikawa, onRequestChange, onDeleteIshikawa }) => {
     const [category, setCategory] = useState('Mano de Obra');
     const [observation, setObservation] = useState('');
     const [isEnhancing, setIsEnhancing] = useState(false);
@@ -213,9 +224,21 @@ export const IshikawaSection: React.FC<IshikawaSectionProps> = ({ claim, isAdmin
              {claim.ishikawaList && claim.ishikawaList.length > 0 ? (
                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
                      {claim.ishikawaList.map((item) => (
-                         <div key={item.id} className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm">
+                         <div key={item.id} className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm relative group">
                              <span className="font-bold text-indigo-600 block text-xs uppercase mb-1">{item.category}</span>
                              <p className="text-slate-700">{item.observation}</p>
+                             
+                             {/* ACTIONS FOR ISHIKAWA */}
+                             {isAdmin && (
+                                <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-white/80 p-1 rounded backdrop-blur-sm">
+                                    <button onClick={() => onRequestChange(item.id, item.observation)} className="text-blue-400 hover:text-blue-600 p-1">
+                                        {currentRole === InternalRole.AUDIT ? <MessageSquare size={14}/> : <Edit3 size={14}/>}
+                                    </button>
+                                    <button onClick={() => onDeleteIshikawa(item.id)} className="text-red-300 hover:text-red-500 p-1">
+                                        <Trash2 size={14} />
+                                    </button>
+                                </div>
+                             )}
                          </div>
                      ))}
                  </div>
@@ -272,12 +295,13 @@ interface ActionPlanSectionProps extends SectionProps {
     onSaveTask: (desc: string, assignedTo: string) => void;
     onExecuteTask: (id: string, note: string, file: File | null) => void;
     onDeleteTask: (id: string) => void;
+    onRequestChange: (id: string, currentText?: string) => void;
     onApprovePlan: () => void;
     onViewEvidence: (file: EvidenceFile) => void;
 }
 
 export const ActionPlanSection: React.FC<ActionPlanSectionProps> = ({
-    claim, isAdmin, currentRole, onSaveTask, onExecuteTask, onDeleteTask, onApprovePlan, onViewEvidence
+    claim, isAdmin, currentRole, onSaveTask, onExecuteTask, onDeleteTask, onRequestChange, onApprovePlan, onViewEvidence
 }) => {
     const [taskDesc, setTaskDesc] = useState('');
     const [assignedTo, setAssignedTo] = useState('Mantenimiento');
@@ -314,7 +338,10 @@ export const ActionPlanSection: React.FC<ActionPlanSectionProps> = ({
 
     const canExecute = (assignedRole: string) => {
         // RESTRICTION: Only the assigned role can execute. Admin/Audit CANNOT execute for others.
-        return assignedRole === currentRole;
+        if (assignedRole === currentRole) return true;
+        // Exception: Quality Aux can execute Quality tasks
+        if (assignedRole === 'Calidad' && currentRole === InternalRole.QUALITY_AUX) return true;
+        return false;
     };
 
     const allTasksRealized = claim.tasks && claim.tasks.length > 0 && claim.tasks.every(t => t.status === 'Realized');
@@ -380,18 +407,26 @@ export const ActionPlanSection: React.FC<ActionPlanSectionProps> = ({
                                     </div>
                                     <p className="text-sm text-slate-800 font-medium">{task.description}</p>
                                 </div>
+                                
+                                {/* ADMIN/AUDIT ACTIONS */}
                                 {isAdmin && !planApproved && (
-                                    <button onClick={() => onDeleteTask(task.id)} className="text-slate-300 hover:text-red-500 transition">
-                                        <Trash2 size={16} />
-                                    </button>
+                                    <div className="flex items-center gap-1">
+                                        <button onClick={() => onRequestChange(task.id, task.description)} className="p-1.5 text-blue-400 hover:text-blue-600 rounded hover:bg-blue-50 transition" title={currentRole === InternalRole.AUDIT ? "Solicitar Cambio" : "Editar Texto"}>
+                                            {currentRole === InternalRole.AUDIT ? <MessageSquare size={16}/> : <Edit3 size={16}/>}
+                                        </button>
+                                        <button onClick={() => onDeleteTask(task.id)} className="p-1.5 text-slate-300 hover:text-red-500 transition">
+                                            <Trash2 size={16} />
+                                        </button>
+                                    </div>
                                 )}
                             </div>
 
-                            {task.status === 'Pending' && (
+                            {/* EXECUTION FORM (Shows if Pending OR if user clicks Edit on a realized task) */}
+                            {(task.status === 'Pending' || executingId === task.id) && (
                                 <div className="mt-3">
                                     {canExecute(task.assignedTo) && executingId !== task.id ? (
                                         <button onClick={() => { setExecutingId(task.id); setExecNote(task.executionNotes || ''); }} className="text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg font-bold shadow hover:bg-indigo-700 transition flex items-center gap-1">
-                                            <Activity size={12}/> Ejecutar Tarea
+                                            <Activity size={12}/> {task.status === 'Realized' ? 'Editar Ejecución' : 'Ejecutar Tarea'}
                                         </button>
                                     ) : executingId === task.id ? (
                                         <div className="bg-white p-3 rounded-lg border border-indigo-100 shadow-sm animate-fadeIn">
@@ -415,13 +450,25 @@ export const ActionPlanSection: React.FC<ActionPlanSectionProps> = ({
                                 </div>
                             )}
 
-                            {task.status === 'Realized' && (
-                                <div className="mt-3 pt-3 border-t border-slate-100 bg-slate-50/50 -mx-4 -mb-4 p-4 rounded-b-xl">
+                            {/* REALIZED DISPLAY */}
+                            {task.status === 'Realized' && executingId !== task.id && (
+                                <div className="mt-3 pt-3 border-t border-slate-100 bg-slate-50/50 -mx-4 -mb-4 p-4 rounded-b-xl relative group">
                                     <p className="text-xs font-bold text-slate-500 uppercase mb-1">Resultado:</p>
                                     <p className="text-sm text-slate-700 italic mb-2">"{task.executionNotes}"</p>
                                     {task.executionEvidence && task.executionEvidence.length > 0 && (
                                         <button onClick={() => onViewEvidence(task.executionEvidence![0])} className="text-xs text-indigo-600 hover:underline flex items-center gap-1 font-bold">
                                             <Eye size={12}/> Ver Evidencia Adjunta
+                                        </button>
+                                    )}
+                                    
+                                    {/* Re-edit button for owner */}
+                                    {canExecute(task.assignedTo) && !planApproved && (
+                                        <button 
+                                            onClick={() => { setExecutingId(task.id); setExecNote(task.executionNotes || ''); }}
+                                            className="absolute top-3 right-3 text-slate-400 hover:text-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity bg-white rounded-full p-1 shadow-sm"
+                                            title="Corregir Ejecución"
+                                        >
+                                            <Edit3 size={14}/>
                                         </button>
                                     )}
                                 </div>

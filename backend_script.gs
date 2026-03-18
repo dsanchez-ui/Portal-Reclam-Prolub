@@ -4,6 +4,8 @@ const CLAIMS_SHEET = 'Reclamaciones';
 const TASKS_SHEET = 'Tareas';
 const MITIGATIONS_SHEET = 'Mitigaciones';
 const ISHIKAWA_SHEET = 'Ishikawa';
+const CHANGE_REQUESTS_SHEET = 'SolicitudesCambio';
+const INTEGRANTES_SHEET = 'INTEGRANTES';
 
 // ==========================================
 // SETUP & UTILITIES
@@ -16,7 +18,9 @@ function setupSheets() {
     [CLAIMS_SHEET]: ['ID_Reclamacion', 'Fecha_Reporte', 'Estado', 'Cliente', 'Nombre_Reporta', 'Email_Reporta', 'Numero_Factura', 'Marca', 'Productos_Afectados_RAW', 'Lotes_RAW', 'Tipo_Incidente', 'Descripcion', 'Tipo_Correccion', 'URL_Carpeta_Drive', 'Fecha_Cierre_Interno', 'Items_Afectados_JSON', 'Archivos_JSON', 'Estado_Plan_Accion', 'Archivado', 'URL_Carpeta_Cliente', 'Ultima_Actualizacion', 'Fase_Mitigacion_Cerrada'],
     [TASKS_SHEET]: ['ID_Tarea', 'ID_Reclamacion', 'Descripcion', 'Asignado_A', 'Estado', 'Notas_Ejecucion', 'Evidencia_JSON', 'Fecha_Creacion', 'Fecha_Completado'],
     [MITIGATIONS_SHEET]: ['ID_Mitigacion', 'ID_Reclamacion', 'Descripcion', 'Asignado_A', 'Estado', 'Notas_Ejecucion', 'Evidencia_JSON', 'Fecha_Creacion', 'Fecha_Completado', 'Fecha_Aprobado'],
-    [ISHIKAWA_SHEET]: ['ID_Ishikawa', 'ID_Reclamacion', 'Categoria', 'Observacion', 'Fecha_Creacion']
+    [ISHIKAWA_SHEET]: ['ID_Ishikawa', 'ID_Reclamacion', 'Categoria', 'Observacion', 'Fecha_Creacion'],
+    [CHANGE_REQUESTS_SHEET]: ['ID_Solicitud', 'ID_Reclamacion', 'Tipo_Item', 'ID_Item', 'Texto_Solicitud', 'Estado', 'Fecha_Creacion'],
+    [INTEGRANTES_SHEET]: ['Name', 'Email']
   };
 
   Object.keys(sheets).forEach(name => {
@@ -88,6 +92,10 @@ function doGet(e) {
     const { data: tasksData } = getSheetAndData(doc, TASKS_SHEET);
     const { data: mitigationsData } = getSheetAndData(doc, MITIGATIONS_SHEET);
     const { data: ishikawaData } = getSheetAndData(doc, ISHIKAWA_SHEET);
+    const { data: requestsData } = getSheetAndData(doc, CHANGE_REQUESTS_SHEET);
+    const { data: integrantesData } = getSheetAndData(doc, INTEGRANTES_SHEET);
+    
+    const integrantes = integrantesData.map(row => ({ name: row[0], email: row[1] })).filter(i => i.name && i.email);
     
     const tasksMap = tasksData.reduce((acc, row) => {
       const claimId = row[1];
@@ -107,6 +115,21 @@ function doGet(e) {
       const claimId = row[1];
       if (!acc[claimId]) acc[claimId] = [];
       acc[claimId].push({ id: row[0], category: row[2], observation: row[3], createdAt: row[4] });
+      return acc;
+    }, {});
+
+    const requestsMap = requestsData.reduce((acc, row) => {
+      const claimId = row[1];
+      if (!acc[claimId]) acc[claimId] = [];
+      // Only include pending requests or needed logic
+      acc[claimId].push({ 
+          id: row[0], 
+          itemType: row[2], 
+          itemId: row[3], 
+          requestText: row[4], 
+          status: row[5], 
+          createdAt: row[6] 
+      });
       return acc;
     }, {});
 
@@ -141,11 +164,12 @@ function doGet(e) {
         tasks: tasksMap[id] || [],
         mitigationActions: allMitigations,
         ishikawaList: ishikawaMap[id] || [],
+        changeRequests: requestsMap[id] || [], // Attach requests
         immediateSolutionStatus: allApproved ? 'Approved' : 'Pending',
       };
     });
 
-    return ContentService.createTextOutput(JSON.stringify({ result: 'success', data: claims })).setMimeType(ContentService.MimeType.JSON);
+    return ContentService.createTextOutput(JSON.stringify({ result: 'success', data: claims, integrantes: integrantes })).setMimeType(ContentService.MimeType.JSON);
   } catch (e) {
     return ContentService.createTextOutput(JSON.stringify({ result: 'error', error: e.toString(), stack: e.stack })).setMimeType(ContentService.MimeType.JSON);
   } finally {
@@ -169,7 +193,7 @@ function doPost(e) {
   try {
     const doc = SpreadsheetApp.getActiveSpreadsheet();
     const data = JSON.parse(e.postData.contents);
-    const { action, claimData, rawFiles, id, date, claimId, fileName, base64, reportType, itemData, targetEmail, itemType, pdfBase64, recipientEmails, folderUrl } = data;
+    const { action, claimData, rawFiles, id, date, claimId, fileName, base64, reportType, itemData, targetEmail, itemType, pdfBase64, recipientEmails, folderUrl, auditType, requestText, requestId } = data;
     
     setupSheets(); 
 
@@ -180,6 +204,12 @@ function doPost(e) {
          return sendNotificationAction(claimData);
       case 'send_assignment_alert':
          return sendAssignmentAlertAction(claimData, itemData, targetEmail, itemType);
+      case 'send_audit_alert':
+         return sendAuditAlertAction(claimData, auditType);
+      case 'send_change_request':
+         return sendChangeRequestAction(doc, claimData, itemData, requestText, targetEmail, itemType);
+      case 'resolve_change_request':
+         return resolveChangeRequestAction(doc, requestId);
       case 'finalize_response': 
          return finalizeResponseAction(doc, claimData, pdfBase64, recipientEmails); // Pass doc
       case 'update_claim':
@@ -207,11 +237,11 @@ function doPost(e) {
   }
 }
 
-// ... (Email Functions remain unchanged) ...
+// ... (Email Functions) ...
 function renderEmailTemplate(data) {
   const { title, titleColor, subTitle, intro, topWidgetHtml, highlightBoxTitle, highlightBoxContent, highlightBoxColor, highlightBoxBorderColor, ctaText, ctaUrl, secondaryLinkUrl, claimData } = data;
-  const caseDetailsHtml = `<table style="width: 100%; border-collapse: separate; border-spacing: 0; margin-bottom: 25px;"><tr><td style="width: 50%; padding: 12px; background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px 0 0 8px; vertical-align: top;"><div style="font-size: 10px; text-transform: uppercase; color: #64748b; font-weight: bold; margin-bottom: 4px;">📂 ID Caso</div><div style="font-size: 14px; color: #0f172a; font-weight: bold;">${claimData.id}</div><div style="font-size: 12px; color: #334155; margin-top: 2px;">${claimData.client}</div></td><td style="width: 50%; padding: 12px; background-color: #f8fafc; border: 1px solid #e2e8f0; border-left: none; border-radius: 0 8px 8px 0; vertical-align: top;"><div style="font-size: 10px; text-transform: uppercase; color: #64748b; font-weight: bold; margin-bottom: 4px;">📦 Producto / Lote</div><div style="font-size: 12px; color: #0f172a; line-height: 1.3;">${claimData.productRef}</div><div style="font-size: 12px; color: #475569; margin-top: 4px;">Lote: ${claimData.batch || 'N/A'}</div></td></tr><tr><td style="height: 8px;"></td></tr><tr><td colspan="2" style="padding: 8px 12px; background-color: #fff; border: 1px dashed #cbd5e1; border-radius: 6px;"><span style="font-size: 11px; color: #64748b;"><strong>Tipo:</strong> ${claimData.incidentType} | <strong>Fecha:</strong> ${claimData.date}</span></td></tr></table>`;
-  return `<div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; color: #333; background-color: #ffffff; padding: 25px; border: 1px solid #e2e8f0; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);"><div style="text-align: center; margin-bottom: 30px;"><img src="https://i.ibb.co/0RTvYnq6/Logo-Prolub-principal-3.png" alt="Prolub Logo" style="height: 45px; margin-bottom: 12px;"><h1 style="color: ${titleColor}; margin: 5px 0 2px 0; font-size: 24px; font-weight: 900; letter-spacing: -0.5px; text-transform: uppercase;">${title}</h1><p style="color: #64748b; margin: 0; font-size: 12px; letter-spacing: 1px;">${subTitle}</p></div>${topWidgetHtml ? topWidgetHtml : ''}<p style="font-size: 15px; line-height: 1.6; color: #334155; margin-bottom: 25px;">${intro}</p>${caseDetailsHtml}<div style="margin-bottom: 30px;"><div style="font-size: 11px; font-weight: bold; color: ${highlightBoxBorderColor || '#64748b'}; text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.5px;">${highlightBoxTitle}</div><div style="background-color: ${highlightBoxColor}; border-left: 4px solid ${highlightBoxBorderColor}; padding: 16px; color: #1e293b; border-radius: 6px; font-size: 14px; line-height: 1.5; font-style: italic;">"${highlightBoxContent}"</div></div><div style="text-align: center; margin-bottom: 40px; border-top: 1px solid #f1f5f9; paddingTop: 30px;"><a href="${ctaUrl}" style="display: inline-block; background-color: ${titleColor}; color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 14px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2); transition: all 0.2s;">${ctaText}</a><br><br><a href="${secondaryLinkUrl}" style="color: ${titleColor}; font-size: 13px; text-decoration: none; display: inline-flex; align-items: center; font-weight: 600; border-bottom: 1px dotted ${titleColor}; padding-bottom: 2px;">📂 Ver Evidencias en Carpeta Drive</a></div><div style="border-top: 1px solid #e2e8f0; padding-top: 20px; text-align: center; font-size: 11px; color: #94a3b8; line-height: 1.6;"><strong style="color: #64748b; font-size: 12px;">Prolub S.A.</strong> | Gestión de Calidad & Excelencia Operativa<br>© ${new Date().getFullYear()} Notificación Automática del Sistema</div></div>`;
+  const caseDetailsHtml = `<table style="width: 100%; border-collapse: separate; border-spacing: 0; margin-bottom: 25px;"><tr><td style="width: 50%; padding: 12px; background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px 0 0 8px; vertical-align: top;"><div style="font-size: 10px; text-transform: uppercase; color: #64748b; font-weight: bold; margin-bottom: 4px;">📂 ID Caso / Factura</div><div style="font-size: 14px; color: #0f172a; font-weight: bold;">${claimData.id}</div><div style="font-size: 12px; color: #334155; margin-top: 2px;">${claimData.client}</div><div style="font-size: 11px; color: #64748b; margin-top: 4px;">Factura: ${claimData.invoiceNumber}</div></td><td style="width: 50%; padding: 12px; background-color: #f8fafc; border: 1px solid #e2e8f0; border-left: none; border-radius: 0 8px 8px 0; vertical-align: top;"><div style="font-size: 10px; text-transform: uppercase; color: #64748b; font-weight: bold; margin-bottom: 4px;">📦 Producto / Lote</div><div style="font-size: 12px; color: #0f172a; line-height: 1.3;">${claimData.productRef}</div><div style="font-size: 12px; color: #475569; margin-top: 4px;">Lote: ${claimData.batch || 'N/A'}</div></td></tr><tr><td style="height: 8px;"></td></tr><tr><td colspan="2" style="padding: 8px 12px; background-color: #fff; border: 1px dashed #cbd5e1; border-radius: 6px;"><span style="font-size: 11px; color: #64748b;"><strong>Tipo:</strong> ${claimData.incidentType} | <strong>Fecha:</strong> ${claimData.date}</span></td></tr></table>`;
+  return `<div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; color: #333; background-color: #ffffff; padding: 25px; border: 1px solid #e2e8f0; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);"><div style="text-align: center; margin-bottom: 30px;"><img src="https://drive.google.com/thumbnail?id=18VsOvi3qnV_Wh1xK97WMqpZslWwPvgya&sz=w1000" alt="Prolub Logo" style="height: 45px; margin-bottom: 12px;"><h1 style="color: ${titleColor}; margin: 5px 0 2px 0; font-size: 24px; font-weight: 900; letter-spacing: -0.5px; text-transform: uppercase;">${title}</h1><p style="color: #64748b; margin: 0; font-size: 12px; letter-spacing: 1px;">${subTitle}</p></div>${topWidgetHtml ? topWidgetHtml : ''}<p style="font-size: 15px; line-height: 1.6; color: #334155; margin-bottom: 25px;">${intro}</p>${caseDetailsHtml}${highlightBoxTitle ? `<div style="margin-bottom: 30px;"><div style="font-size: 11px; font-weight: bold; color: ${highlightBoxBorderColor || '#64748b'}; text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.5px;">${highlightBoxTitle}</div><div style="background-color: ${highlightBoxColor}; border-left: 4px solid ${highlightBoxBorderColor}; padding: 16px; color: #1e293b; border-radius: 6px; font-size: 14px; line-height: 1.5; font-style: italic;">${highlightBoxContent}</div></div>` : ''}<div style="text-align: center; margin-bottom: 40px; border-top: 1px solid #f1f5f9; paddingTop: 30px;"><a href="${ctaUrl}" style="display: inline-block; background-color: ${titleColor}; color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 14px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2); transition: all 0.2s;">${ctaText}</a></div><div style="border-top: 1px solid #e2e8f0; padding-top: 20px; text-align: center; font-size: 11px; color: #94a3b8; line-height: 1.6;"><strong style="color: #64748b; font-size: 12px;">Prolub S.A.</strong> | Gestión de Calidad & Excelencia Operativa<br>© ${new Date().getFullYear()} Notificación Automática del Sistema</div></div>`;
 }
 
 function sendEmailWithStandardCC(recipients, subject, htmlBody) {
@@ -223,12 +253,8 @@ function sendEmailWithStandardCC(recipients, subject, htmlBody) {
     
     // Build CC List - Explicitly add Lab and Commercial if not in TO
     let ccList = [];
-    if (!toListStr.includes(LAB_EMAIL)) {
-        ccList.push(LAB_EMAIL);
-    }
-    if (!toListStr.includes(COM_EMAIL)) {
-        ccList.push(COM_EMAIL);
-    }
+    if (!toListStr.includes(LAB_EMAIL)) ccList.push(LAB_EMAIL);
+    if (!toListStr.includes(COM_EMAIL)) ccList.push(COM_EMAIL);
 
     try {
         MailApp.sendEmail({ 
@@ -237,20 +263,20 @@ function sendEmailWithStandardCC(recipients, subject, htmlBody) {
             subject: subject, 
             htmlBody: htmlBody, 
             name: 'Portal de Calidad Prolub'
-            // REMOVED Reply-To as requested, to avoid auto-replying to lab email
         });
     } catch (e) {
         console.error("Failed to send email: " + e.toString());
     }
 }
 
+// ... Existing email functions ...
 function sendCreationEmail(claimData) {
   const labEmail = "liderlaboratorio@gulfcolombia.com";
   const reporterEmail = claimData.reporterEmail;
   let recipients = labEmail;
   if (reporterEmail && reporterEmail.indexOf("@") > -1) { recipients += "," + reporterEmail; }
   const subject = `[NUEVO CASO] ${claimData.id} - ${claimData.client} - ${claimData.incidentType}`;
-  const appLink = "https://aistudio.google.com/apps/drive/1SFUt2yy9I85dsyR_AXJN9OI45p3G9IbF?showAssistant=true&showPreview=true";
+  const appLink = "https://portal-reclamacion-prolub-302740316698.us-west1.run.app/";
   const driveLink = claimData.driveFolderUrl || "#";
   const progressBarHtml = `<div style="background-color: #f8fafc; padding: 20px; border-radius: 12px; margin-bottom: 30px; text-align: center; border: 1px solid #e2e8f0;"><h3 style="margin-top: 0; margin-bottom: 15px; color: #64748b; font-size: 11px; letter-spacing: 2px; text-transform: uppercase;">Estado del Proceso</h3><div style="display: flex; justify-content: center; align-items: center; gap: 10px;"><span style="font-size: 20px;">📝</span><span style="font-weight: bold; color: #1e3a8a; font-size: 14px;">Reporte Inicial Registrado</span></div></div>`;
   const htmlBody = renderEmailTemplate({ title: "Nueva Solicitud Registrada", titleColor: "#1e3a8a", subTitle: "Sistema de Gestión de Calidad", topWidgetHtml: progressBarHtml, intro: `Hola <strong>${claimData.reporterName}</strong>,<br>Se ha generado exitosamente la solicitud de reclamación. El equipo de Laboratorio procederá con el análisis inicial.`, highlightBoxTitle: "DESCRIPCIÓN DEL REPORTE", highlightBoxContent: claimData.description, highlightBoxColor: "#f1f5f9", highlightBoxBorderColor: "#4f46e5", ctaText: "INGRESAR AL PORTAL", ctaUrl: appLink, secondaryLinkUrl: driveLink, claimData: claimData });
@@ -259,12 +285,11 @@ function sendCreationEmail(claimData) {
 
 function sendAssignmentEmail(claimData, itemData, targetEmail, itemType) {
   if (!targetEmail) return;
-  const appLink = "https://aistudio.google.com/apps/drive/1SFUt2yy9I85dsyR_AXJN9OI45p3G9IbF?showAssistant=true&showPreview=true";
+  const appLink = "https://portal-reclamacion-prolub-302740316698.us-west1.run.app/";
   const driveLink = claimData.driveFolderUrl || "#";
   const isMitigation = itemType === 'MITIGATION';
   const title = isMitigation ? "URGENTE: MITIGACIÓN ASIGNADA" : "NUEVA TAREA ASIGNADA";
   const titleColor = isMitigation ? "#b91c1c" : "#1e3a8a";
-  // Updated Subject to include Client Name at the end
   const subject = `[${isMitigation ? 'URGENTE' : 'TAREA'}] ${title} - Caso ${claimData.id} - ${claimData.client}`;
   let daysElapsed = 0;
   if (claimData.date) {
@@ -280,6 +305,135 @@ function sendAssignmentEmail(claimData, itemData, targetEmail, itemType) {
   sendEmailWithStandardCC(targetEmail, subject, htmlBody);
 }
 
+function sendAuditAlertAction(claimData, auditType) {
+    const AUDITOR_EMAIL = "jmorales@prolub.com.co";
+    const appLink = "https://portal-reclamacion-prolub-302740316698.us-west1.run.app/";
+    
+    const isMitigation = auditType === 'MITIGATION_READY';
+    const title = isMitigation ? "MITIGACIONES EJECUTADAS - PENDIENTE APROBACIÓN" : "PLAN DE ACCIÓN EJECUTADO - PENDIENTE APROBACIÓN";
+    const subject = `[AUDITORÍA] ${isMitigation ? 'Mitigaciones' : 'Plan Acción'} Listos - Caso ${claimData.id} - ${claimData.client}`;
+    
+    // Generate List HTML
+    let itemsHtml = '<ul style="padding-left: 20px; color: #334155; font-size: 13px;">';
+    const items = isMitigation ? claimData.mitigationActions : claimData.tasks;
+    
+    if (items && items.length > 0) {
+        items.forEach(item => {
+            const statusStyle = item.status === 'Approved' ? 'color: green;' : 'color: orange;';
+            const execNote = item.executionNotes ? `<br><em style="color:#64748b; font-size: 12px;">Ejecución: ${item.executionNotes}</em>` : '';
+            itemsHtml += `<li style="margin-bottom: 10px;"><strong>${item.assignedTo}:</strong> ${item.description} <span style="${statusStyle}">(${item.status})</span>${execNote}</li>`;
+        });
+    } else {
+        itemsHtml += '<li>No se encontraron ítems.</li>';
+    }
+    itemsHtml += '</ul>';
+
+    const widget = `<div style="background-color: #f0fdf4; border: 1px solid #bbf7d0; padding: 15px; border-radius: 12px; margin-bottom: 25px; text-align: center;"><div style="font-size: 14px; font-weight: bold; color: #166534;">✅ Ejecución Completada</div><p style="font-size: 12px; color: #15803d; margin-top: 5px;">El equipo operativo ha finalizado sus tareas. Se requiere su revisión.</p></div>`;
+
+    const htmlBody = renderEmailTemplate({
+        title: title,
+        titleColor: "#166534",
+        subTitle: "Auditoría de Calidad Prolub S.A.",
+        topWidgetHtml: widget,
+        intro: `Hola <strong>Auditoría (jmorales)</strong>,<br>El caso ${claimData.id} tiene ítems ejecutados que requieren su validación y aprobación final para avanzar o cerrar el caso.`,
+        highlightBoxTitle: "RESUMEN DE ÍTEMS POR APROBAR",
+        highlightBoxContent: itemsHtml, // We inject HTML directly here
+        highlightBoxColor: "#ffffff",
+        highlightBoxBorderColor: "#166534",
+        ctaText: "IR A APROBAR EN EL PORTAL",
+        ctaUrl: appLink,
+        claimData: claimData
+    });
+    
+    sendEmailWithStandardCC(AUDITOR_EMAIL, subject, htmlBody);
+    return ContentService.createTextOutput(JSON.stringify({ result: 'success', action: 'audit_email_sent' })).setMimeType(ContentService.MimeType.JSON);
+}
+
+function sendChangeRequestAction(doc, claimData, itemData, requestText, targetEmail, itemType) {
+    if (!targetEmail) return ContentService.createTextOutput(JSON.stringify({ result: 'error', message: 'No target email' })).setMimeType(ContentService.MimeType.JSON);
+    
+    const appLink = "https://portal-reclamacion-prolub-302740316698.us-west1.run.app/";
+    const driveLink = claimData.driveFolderUrl || "#";
+    
+    // Determine friendly name for Item Type
+    let friendlyItemType = "";
+    if (itemType === 'MITIGATION') friendlyItemType = "Tarea de Mitigación Inmediata";
+    else if (itemType === 'TASK') friendlyItemType = "Tarea de Plan de Acción";
+    else if (itemType === 'ISHIKAWA') friendlyItemType = "Análisis Causa Raíz";
+    else friendlyItemType = itemType;
+
+    const title = "SOLICITUD DE CAMBIO (AUDITORÍA)";
+    const subject = `[CAMBIO REQUERIDO] ${friendlyItemType} - Caso ${claimData.id} - ${claimData.client}`;
+    
+    // Construct Description based on Type
+    let originalDesc = "";
+    let assignedArea = "";
+    
+    if (itemType === 'ISHIKAWA') {
+        originalDesc = `${itemData.category}: ${itemData.observation}`;
+        assignedArea = "Laboratorio";
+    } else {
+        originalDesc = itemData.description;
+        assignedArea = itemData.assignedTo;
+    }
+
+    // --- SAVE TO SHEET START ---
+    const sheet = doc.getSheetByName(CHANGE_REQUESTS_SHEET);
+    const requestId = Date.now().toString();
+    const createdAt = new Date().toISOString();
+    // ['ID_Solicitud', 'ID_Reclamacion', 'Tipo_Item', 'ID_Item', 'Texto_Solicitud', 'Estado', 'Fecha_Creacion']
+    sheet.appendRow([requestId, claimData.id, friendlyItemType, itemData.id, requestText, 'Pending', createdAt]);
+    // --- SAVE TO SHEET END ---
+
+    const widget = `<div style="background-color: #fff7ed; border: 1px solid #fed7aa; padding: 15px; border-radius: 12px; margin-bottom: 25px; text-align: center;"><div style="font-size: 14px; font-weight: bold; color: #c2410c;">⚠️ Corrección Solicitada</div><p style="font-size: 12px; color: #9a3412; margin-top: 5px;">Auditoría ha revisado el caso y requiere ajustes en un ítem.</p></div>`;
+
+    const contentHtml = `
+        <div style="margin-bottom: 20px;">
+            <div style="font-size: 11px; font-weight: bold; color: #64748b; text-transform: uppercase; margin-bottom: 5px;">Tipo de Ítem:</div>
+            <div style="font-size: 13px; color: #0f172a; margin-bottom: 10px;">${friendlyItemType}</div>
+            
+            <div style="font-size: 11px; font-weight: bold; color: #64748b; text-transform: uppercase; margin-bottom: 5px;">Ítem Original:</div>
+            <div style="background-color: #f1f5f9; padding: 10px; border-radius: 6px; font-style: italic; color: #334155; font-size: 13px;">"${originalDesc}"</div>
+        </div>
+        <div style="margin-bottom: 10px;">
+            <div style="font-size: 11px; font-weight: bold; color: #c2410c; text-transform: uppercase; margin-bottom: 5px;">Solicitud de Cambio:</div>
+            <div style="background-color: #fff7ed; border-left: 4px solid #f97316; padding: 15px; color: #c2410c; border-radius: 6px; font-size: 14px; font-weight: bold;">${requestText}</div>
+        </div>
+    `;
+
+    const htmlBody = renderEmailTemplate({
+        title: title,
+        titleColor: "#c2410c",
+        subTitle: "Auditoría de Calidad Prolub S.A.",
+        topWidgetHtml: widget,
+        intro: `Hola <strong>${assignedArea}</strong>,<br>Se requiere que realice modificaciones o correcciones en el siguiente ítem del caso ${claimData.id}.`,
+        highlightBoxTitle: "DETALLE DE LA SOLICITUD",
+        highlightBoxContent: contentHtml, // Injected directly as HTML string
+        highlightBoxColor: "#ffffff",
+        highlightBoxBorderColor: "#fff", // Handled inside contentHtml
+        ctaText: "GESTIONAR CAMBIO",
+        ctaUrl: appLink,
+        secondaryLinkUrl: driveLink,
+        claimData: claimData
+    });
+
+    sendEmailWithStandardCC(targetEmail, subject, htmlBody);
+    return ContentService.createTextOutput(JSON.stringify({ result: 'success', action: 'change_request_sent' })).setMimeType(ContentService.MimeType.JSON);
+}
+
+function resolveChangeRequestAction(doc, requestId) {
+    const sheet = doc.getSheetByName(CHANGE_REQUESTS_SHEET);
+    const rowIndex = findRowIndex(sheet, requestId, 0);
+    
+    if (rowIndex !== -1) {
+        // Update Status (Column 6 / Index 5) to 'Resolved'
+        sheet.getRange(rowIndex, 6).setValue('Resolved');
+        return ContentService.createTextOutput(JSON.stringify({ result: 'success', action: 'resolved' })).setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    return ContentService.createTextOutput(JSON.stringify({ result: 'error', message: 'Request ID not found' })).setMimeType(ContentService.MimeType.JSON);
+}
+
 function sendCompletionEmail(claimData, recipients, pdfUrl) {
   const subject = `[RESPUESTA FINALIZADA] Caso ${claimData.id} - ${claimData.client}`;
   const driveClientLink = claimData.driveClientFolderUrl || claimData.driveFolderUrl || "#";
@@ -289,7 +443,7 @@ function sendCompletionEmail(claimData, recipients, pdfUrl) {
   sendEmailWithStandardCC(recipientString, subject, htmlBody);
 }
 
-// ... (Create, Update, Delete handlers remain mostly the same, ensuring handleFileUploads is called) ...
+// ... (Rest of functions) ...
 
 function finalizeResponseAction(doc, claimData, pdfBase64, recipientEmails) {
     const fileName = `Reporte_Respuesta_${claimData.id}.pdf`;
@@ -373,7 +527,6 @@ function savePdf(claimId, fileName, base64, reportType, folderUrl) {
     return ContentService.createTextOutput(JSON.stringify({ result: 'success', url: url })).setMimeType(ContentService.MimeType.JSON);
 }
 
-// ... (Rest of functions: handleFileUploads, etc) ...
 function createClaim(doc, claimData, rawFiles) {
   const claimsSheet = doc.getSheetByName(CLAIMS_SHEET);
   const tasksSheet = doc.getSheetByName(TASKS_SHEET);

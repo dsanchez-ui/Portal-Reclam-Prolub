@@ -63,6 +63,15 @@ export interface MitigationAction {
   createdAt: string;
 }
 
+export interface ChangeRequest {
+  id: string;
+  itemType: string; // 'Tarea de Mitigación Inmediata', etc.
+  itemId: string;
+  requestText: string;
+  status: 'Pending' | 'Resolved';
+  createdAt: string;
+}
+
 export interface ClaimItem {
   id: string;
   productRef: string;
@@ -113,6 +122,9 @@ export interface Claim {
   // New Flag for visibility management
   archived?: boolean;
   
+  // Change Requests History
+  changeRequests?: ChangeRequest[];
+
   // Concurrency Control
   lastUpdated?: string; // Epoch timestamp string
 }

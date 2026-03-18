@@ -1,6 +1,6 @@
 
-import React, { useRef } from 'react';
-import { AlertTriangle, Trash2, EyeOff, CheckCircle2, Loader2, Download, FolderOpen, X, Send, FileText, Lock } from 'lucide-react';
+import React, { useRef, useState } from 'react';
+import { AlertTriangle, Trash2, EyeOff, CheckCircle2, Loader2, Download, FolderOpen, X, Send, FileText, Lock, MessageSquare, Edit3 } from 'lucide-react';
 import { Claim, ConfirmationType } from '../../types';
 import { ClientReportTemplate, FinalReportTemplate } from '../ReportTemplates';
 import html2canvas from 'html2canvas';
@@ -29,6 +29,70 @@ export const SLAAlert: React.FC<{ cases: Claim[], onClose: () => void }> = ({ ca
                     ))}
                 </div>
                 <button onClick={onClose} className="w-full py-4 bg-slate-900 text-white rounded-xl font-bold hover:bg-black transition shadow-xl">Entendido</button>
+            </div>
+        </div>
+    );
+};
+
+// --- INPUT MODAL (Change Request / Edit Description) ---
+interface InputModalProps {
+    isOpen: boolean;
+    title: string;
+    subtitle: string;
+    placeholder: string;
+    initialValue?: string;
+    isProcessing: boolean;
+    confirmText: string;
+    confirmColorClass: string;
+    icon?: React.ElementType;
+    onConfirm: (text: string) => void;
+    onCancel: () => void;
+}
+
+export const InputModal: React.FC<InputModalProps> = ({ 
+    isOpen, title, subtitle, placeholder, initialValue = '', isProcessing, confirmText, confirmColorClass, icon: Icon, onConfirm, onCancel 
+}) => {
+    const [text, setText] = useState(initialValue);
+    
+    // Reset state when opening
+    React.useEffect(() => {
+        if (isOpen) setText(initialValue);
+    }, [isOpen, initialValue]);
+
+    if (!isOpen) return null;
+
+    return (
+        <div className="fixed inset-0 z-[300] bg-black/60 flex items-center justify-center p-4 backdrop-blur-sm animate-fadeIn">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 border border-white/20">
+                <div className="flex items-center gap-4 mb-4">
+                    <div className="bg-slate-100 p-3 rounded-full text-slate-600">
+                        {Icon ? <Icon size={24}/> : <MessageSquare size={24}/>}
+                    </div>
+                    <div>
+                        <h3 className="text-lg font-bold text-slate-800">{title}</h3>
+                        <p className="text-xs text-slate-500">{subtitle}</p>
+                    </div>
+                </div>
+                
+                <textarea 
+                    className="w-full p-3 border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 mb-4 bg-slate-50 text-sm text-slate-800 resize-none placeholder-slate-400"
+                    rows={4}
+                    placeholder={placeholder}
+                    value={text}
+                    onChange={(e) => setText(e.target.value)}
+                    autoFocus
+                />
+
+                <div className="flex gap-3">
+                    <button onClick={onCancel} className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 transition">Cancelar</button>
+                    <button 
+                        onClick={() => onConfirm(text)} 
+                        disabled={isProcessing || !text.trim()}
+                        className={`flex-1 py-3 text-white rounded-xl font-bold shadow-lg transition flex items-center justify-center gap-2 disabled:opacity-50 ${confirmColorClass}`}
+                    >
+                        {isProcessing ? <Loader2 size={18} className="animate-spin"/> : confirmText}
+                    </button>
+                </div>
             </div>
         </div>
     );

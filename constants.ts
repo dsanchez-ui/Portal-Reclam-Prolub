@@ -5,39 +5,6 @@ export const SECURITY_PINS = {
   AUDIT_ROLE: '2026'
 };
 
-export const REPORTERS_LIST = [
-  { name: "Andres Felipe Hernández", email: "ahernandez@prolub.com.co" },
-  { name: "Angela Pastor", email: "apastor@prolub.com.co" },
-  { name: "Aylin Brian Cepeda Martes", email: "acepeda@prolub.com.co" },
-  { name: "Carlos Andrés Mercado Ortega", email: "cmercado@prolub.com.co" },
-  { name: "Cristian Camilo Blanco", email: "cblanco@prolub.com.co" },
-  { name: "Eddicson Colmenares", email: "ecolmenares@prolub.com.co" },
-  { name: "Edgar Fernando Avilés Martinez", email: "eaviles@prolub.com.co" },
-  { name: "Gabriela Hernández", email: "aghernandez@prolub.com.co" },
-  { name: "Gonzalo Ernesto Rodriguez Pachon", email: "grodriguez@prolub.com.co" },
-  { name: "Jhonn Fredy Flórez Ardila", email: "jflorez@prolub.com.co" },
-  { name: "Johan Stiven Santibáñez Ramírez", email: "jsantibanez@prolub.com.co" },
-  { name: "Jorge Arias", email: "jarias@prolub.com.co" },
-  { name: "Juan Manuel Cubillos Ortegón", email: "jcubillos@prolub.com.co" },
-  { name: "Julián Moreno", email: "jmoreno@prolub.com.co" },
-  { name: "Lina Bayona", email: "lbayona@prolub.com.co" },
-  { name: "Luisa Santos", email: "lsantos@prolub.com.co" },
-  { name: "Maria Fernanda Quiroga", email: "mquiroga@prolub.com.co" },
-  { name: "María Fernanda Fajardo Bustos", email: "mfajardo@prolub.com.co" },
-  { name: "María Paula Silva Pulecio", email: "acomercial@prolub.com.co" },
-  { name: "Miguel Dario Forero Ochoa", email: "mforero@gulfcolombia.com" },
-  { name: "Nalyibe Quiceno Franco", email: "nquiceno@prolub.com.co" },
-  { name: "Omar Mauricio Ramírez Ávila", email: "oramirez@prolub.com.co" },
-  { name: "Sandra Patricia Cerón Sastoque", email: "sceron@gulfcolombia.com" },
-  { name: "Vicente Raúl Toro Ortiz", email: "vtoro@prolub.com.co" },
-  { name: "Victor Alfonso Molina Martinez", email: "vmolina@gulfcolombia.com" },
-  { name: "Víctor Alfonso Molina Martínez", email: "vmolina@prolub.com.co" },
-  { name: "William Arley Pinilla Garcia", email: "wpinilla@gulfcolombia.com" },
-  { name: "William Arley Pinilla García", email: "wpinilla@prolub.com.co" },
-  { name: "Yezid Steven Marín Gutiérrez", email: "ymarin@prolub.com.co" },
-  { name: "Nicolás Tobón (Pruebas)", email: "ntobon@equitel.com.co" }
-];
-
 // Data from provided CSVs
 const GULF_RAW_LIST = `
 GULF PRIDE 2T JASO FBCJA 1/4 X 12 UND4G2TFB-C12

@@ -1,9 +1,9 @@
 
 import React, { useState } from 'react';
 import { 
-  FolderOpen, Trash2, EyeOff, Printer, Lock, FileText, Zap, Timer, Image as ImageIcon, ExternalLink 
+  FolderOpen, Trash2, EyeOff, Printer, Lock, FileText, Zap, Timer, Image as ImageIcon, ExternalLink, Target, AlertCircle, CheckCircle2 
 } from 'lucide-react';
-import { Claim, ClaimStatus, InternalRole, EvidenceFile } from '../../types';
+import { Claim, ClaimStatus, InternalRole, EvidenceFile, ChangeRequest } from '../../types';
 
 // DATE HELPERS
 const parseDate = (dateStr: string | undefined): Date | null => {
@@ -89,7 +89,7 @@ export const ClaimHeader: React.FC<ClaimHeaderProps> = ({ claim, isAdmin, curren
                        <FolderOpen size={16}/>
                    </button>
                </div>
-               <p className="text-sm text-slate-500">{claim.id} • {claim.date}</p>
+               <p className="text-sm text-slate-500">{claim.id} • Factura: {claim.invoiceNumber} • {claim.date}</p>
            </div>
            <div className="flex gap-2">
                {isAdmin && (
@@ -113,6 +113,92 @@ export const ClaimHeader: React.FC<ClaimHeaderProps> = ({ claim, isAdmin, curren
     );
 };
 
+export const ChangeRequestHistory: React.FC<{ claim: Claim, currentRole: InternalRole, onResolve: (id: string) => void }> = ({ claim, currentRole, onResolve }) => {
+    // 1. FILTER REQUESTS BASED ON ROLE AND RELEVANCE
+    const visibleRequests = (claim.changeRequests || []).filter(req => {
+        // Audit sees all
+        if (currentRole === InternalRole.AUDIT) return true;
+        
+        // Only show Pending to operational areas
+        if (req.status !== 'Pending') return false;
+
+        // Find the linked item to check assignment
+        const mitigation = claim.mitigationActions?.find(m => m.id === req.itemId);
+        const task = claim.tasks?.find(t => t.id === req.itemId);
+        
+        // Lab Logic: Sees Ishikawa + Lab/Quality assigned items
+        if (currentRole === InternalRole.LAB) {
+            if (req.itemType.includes('Causa') || req.itemType === 'ISHIKAWA') return true;
+            if (mitigation && (mitigation.assignedTo === 'Laboratorio' || mitigation.assignedTo === 'Calidad')) return true;
+            if (task && (task.assignedTo === 'Laboratorio' || task.assignedTo === 'Calidad')) return true;
+            return false;
+        }
+
+        // Other Roles: Only see if assigned to them
+        if (mitigation && mitigation.assignedTo === currentRole) return true;
+        if (task && task.assignedTo === currentRole) return true;
+
+        return false;
+    });
+
+    if (visibleRequests.length === 0) return null;
+
+    // Helper to get description text
+    const getItemDescription = (req: ChangeRequest) => {
+        const mitigation = claim.mitigationActions?.find(m => m.id === req.itemId);
+        if (mitigation) return mitigation.description;
+        
+        const task = claim.tasks?.find(t => t.id === req.itemId);
+        if (task) return task.description;
+
+        const ishikawa = claim.ishikawaList?.find(i => i.id === req.itemId);
+        if (ishikawa) return `${ishikawa.category}: ${ishikawa.observation}`;
+
+        return "Ítem no encontrado";
+    };
+
+    return (
+        <div className="mb-6 bg-orange-50 border border-orange-200 rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-3">
+                <AlertCircle size={20} className="text-orange-600" />
+                <h3 className="font-bold text-orange-800">Solicitudes de Cambio Pendientes</h3>
+            </div>
+            <div className="space-y-3">
+                {visibleRequests.map(req => (
+                    <div key={req.id} className="bg-white p-3 rounded-lg border border-orange-100 shadow-sm">
+                        <div className="flex justify-between items-start">
+                            <div className="flex-1">
+                                <span className="text-[10px] font-bold text-orange-500 uppercase tracking-wide bg-orange-50 px-2 py-0.5 rounded">{req.itemType}</span>
+                                
+                                {/* Show Original Item Description */}
+                                <div className="mt-2 mb-2 p-2 bg-slate-50 border border-slate-100 rounded text-xs text-slate-500 italic">
+                                    <span className="font-bold not-italic text-slate-400 text-[10px] uppercase block mb-1">Tarea Vinculada:</span>
+                                    "{getItemDescription(req)}"
+                                </div>
+
+                                <p className="text-sm font-bold text-slate-800 mt-1">Solicitud: {req.requestText}</p>
+                                <p className="text-[10px] text-slate-400 mt-2">{new Date(req.createdAt).toLocaleString()}</p>
+                            </div>
+                            {currentRole === InternalRole.AUDIT && req.status === 'Pending' && (
+                                <button 
+                                    onClick={() => onResolve(req.id)}
+                                    className="ml-4 bg-green-600 hover:bg-green-700 text-white p-2 rounded-lg transition shadow-sm flex-shrink-0"
+                                    title="Marcar como Resuelto"
+                                >
+                                    <CheckCircle2 size={16} />
+                                </button>
+                            )}
+                            {req.status === 'Resolved' && (
+                                <span className="ml-4 text-xs font-bold text-green-600 bg-green-50 px-2 py-1 rounded border border-green-100">Resuelto</span>
+                            )}
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+};
+
 export const ClaimInfo: React.FC<{ claim: Claim, onViewEvidence: (file: EvidenceFile) => void }> = ({ claim, onViewEvidence }) => {
     const daysOpen = getDaysPassed(claim.date);
     const clientSlaMet = claim.immediateSolutionStatus === 'Approved';
@@ -125,6 +211,17 @@ export const ClaimInfo: React.FC<{ claim: Claim, onViewEvidence: (file: Evidence
                 </div>
                 <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-black uppercase border ${claim.status === ClaimStatus.CLOSED ? 'bg-slate-100 text-slate-500' : daysOpen > 30 ? 'bg-red-50 border-red-200 text-red-700' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
                     <Timer size={14} /> Cierre Interno: {claim.status === ClaimStatus.CLOSED ? 'CERRADO' : daysOpen + '/30 Días'}
+                </div>
+           </div>
+
+           {/* EXPECTED SOLUTION SECTION - NEW */}
+           <div className={`mb-4 p-3 rounded-xl border flex items-center gap-3 ${claim.correctionType?.includes('$') ? 'bg-green-50 border-green-200 text-green-900' : 'bg-blue-50 border-blue-200 text-blue-900'}`}>
+                <div className={`p-2 rounded-lg ${claim.correctionType?.includes('$') ? 'bg-green-100' : 'bg-blue-100'}`}>
+                    <Target size={20} />
+                </div>
+                <div>
+                    <span className="text-[10px] font-bold uppercase opacity-70 block mb-0.5">Solución Esperada por Cliente</span>
+                    <p className="font-bold text-sm">{claim.correctionType || 'No especificada'}</p>
                 </div>
            </div>
 
